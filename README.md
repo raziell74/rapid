@@ -16,7 +16,7 @@ R.A.P.I.D. fixes this by treating your chaotic pile of loose files exactly like 
 
 ### 1. The MO2 Python Plugin (The Indexer)
 
-Before `SkyrimSE.exe` even realizes it's alive, the R.A.P.I.D. MO2 plugin swoops in. It taps into the `mobase.IFileTree` interface to instantly grab the final, conflict-resolved state of your virtual `Data` directory. It then serializes this tree into a highly compressed binary cache file (essentially a fake BSA header for your loose files) and gently places it into your active MO2 profile.
+Before `SkyrimSE.exe` even realizes it's alive, the R.A.P.I.D. MO2 plugin swoops in. It taps into the `mobase.IFileTree` interface to instantly grab the final, conflict-resolved state of your virtual `Data` directory. It then serializes this tree into a compressed binary cache file (essentially a fake BSA header for your loose files) and gently places it into your active MO2 profile.
 
 ### 2. The SKSE CommonLibSSE-NG Plugin (The Injector)
 
