@@ -38,14 +38,13 @@ ALLOWED_EXTENSIONS = (
     '.swf',                                                  # Interface
     '.ini', '.json', '.toml', '.xml',                        # Config (Papyrus extenders, HDT, MCM)
     '.bat',                                                  # Console-callable
-    '.bik',                                                  # Video
+    '.bik, .mp4',                                            # Video
     '.strings', '.dlstrings', '.ilstrings',                  # Localization
     '.jslot', '.osp',                                        # Presets (RaceMenu, BodySlide)
     '.ttf', '.otf',                                          # Fonts
     '.bgsm', '.bgem',                                        # Materials
     '.osd',                                                  # Object/scene data
 )
-
 
 def get_rapid_cache_path(organizer: mobase.IOrganizer, settings_plugin_name: str) -> str:
     """Resolve the cache file path from the output_to_mod setting (Overwrite or a mod name)."""
