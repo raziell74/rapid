@@ -33,22 +33,18 @@ CACHE_SUBDIR = ("SKSE", "Plugins", "RAPID")
 DATA_PREFIX = "data\\"
 RAP2_MAGIC = b"RAP2"
 RAP2_VERSION = 2
+PACK_U16 = struct.Struct("<H")
+PACK_U32 = struct.Struct("<I")
+PACK_U64 = struct.Struct("<Q")
 ENGINE_DATA_SUBDIRS = frozenset({
     "textures", "meshes", "facegen", "interface", "music", "sound",
     "scripts", "maxheights", "vis", "grass", "strings", "shadersfx",
 })
-HASH_PARITY_VECTORS = (
-    "textures/actors/character/face.dds",
-    "meshes/armor/iron/ironhelmet.nif",
-    "sound/voice/skyrim.esm/guard/hello.wav",
-    "scripts/test.pex",
-    "Data\\Textures\\Example.DDS",
-)
 
 EXCLUDED_EXTENSIONS = (
     '.esp', '.esm', '.esl',                                  # Plugins (load order)
     '.bsa', '.ba2',                                          # Archives (mounted separately)
-    '.exe'                                                   # Executables
+    '.exe',                                                  # Executables
     '.psc',                                                  # Papyrus source files
     '.skse',                                                 # Plugin metadata
     '.md', '.pdf',                                           # Documentation
@@ -119,12 +115,6 @@ def _compute_rapid_hash64(path: str) -> int:
     return ((high << 32) | low) & 0xFFFFFFFFFFFFFFFF
 
 
-def _emit_hash_parity_vectors() -> None:
-    for sample in HASH_PARITY_VECTORS:
-        normalized = _normalize_path(sample)
-        value = _compute_rapid_hash64(sample)
-        print(f"RAPID hash vector path={sample!r} normalized={normalized!r} hash=0x{value:016X}")
-
 def get_rapid_cache_path(organizer: mobase.IOrganizer, settings_plugin_name: str) -> str:
     """Resolve the cache file path from the output_to_mod setting (Overwrite or a mod name)."""
     raw = organizer.pluginSetting(settings_plugin_name, "output_to_mod")
@@ -170,17 +160,6 @@ def _get_cache_path_candidates(organizer: mobase.IOrganizer, settings_plugin_nam
     except Exception:
         pass
     return candidates
-
-
-def _find_existing_cache_path(candidates: list[str]) -> str | None:
-    for path in candidates:
-        if os.path.isfile(path):
-            return path
-    return None
-
-
-def _default_excluded_extensions_setting() -> str:
-    return ",".join(EXCLUDED_EXTENSIONS)
 
 
 def _get_excluded_extensions_for_settings(organizer: mobase.IOrganizer, settings_plugin_name: str) -> frozenset[str]:
@@ -261,25 +240,32 @@ def _serialize_metadata(
     ext_counter: Counter[str],
     root_counter: Counter[str],
 ) -> bytes:
-    _pack_u32 = struct.Struct('<I')
-    _pack_u16 = struct.Struct('<H')
-    _pack_u64 = struct.Struct('<Q')
-    parts = [_pack_u64.pack(build_time_ms)]
+    parts = [PACK_U64.pack(build_time_ms)]
     ext_items = ext_counter.most_common()
-    parts.append(_pack_u32.pack(len(ext_items)))
+    parts.append(PACK_U32.pack(len(ext_items)))
     for ext, count in ext_items:
         b = ext.encode("utf-8")
-        parts.append(_pack_u16.pack(len(b)))
+        parts.append(PACK_U16.pack(len(b)))
         parts.append(b)
-        parts.append(_pack_u32.pack(count))
+        parts.append(PACK_U32.pack(count))
     root_items = root_counter.most_common()
-    parts.append(_pack_u32.pack(len(root_items)))
+    parts.append(PACK_U32.pack(len(root_items)))
     for root, count in root_items:
         b = root.encode("utf-8")
-        parts.append(_pack_u16.pack(len(b)))
+        parts.append(PACK_U16.pack(len(b)))
         parts.append(b)
-        parts.append(_pack_u32.pack(count))
+        parts.append(PACK_U32.pack(count))
     return b"".join(parts)
+
+
+def _compute_path_counters(paths: list[str]) -> tuple[Counter[str], Counter[str]]:
+    ext_counter: Counter[str] = Counter()
+    root_counter: Counter[str] = Counter()
+    for path in paths:
+        _, ext = os.path.splitext(path)
+        ext_counter[ext.lower() if ext else "(no ext)"] += 1
+        root_counter[path.split("\\", 1)[0]] += 1
+    return ext_counter, root_counter
 
 
 def _parse_metadata(
@@ -336,7 +322,6 @@ def _parse_metadata(
 
 def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bool:
     """Run VFS indexing and write rapid_vfs_cache.bin to the configured output (Overwrite or named mod)."""
-    _emit_hash_parity_vectors()
     vfs_tree = organizer.virtualFileTree()
     excluded_extensions = _get_excluded_extensions_for_settings(organizer, settings_plugin_name)
 
@@ -470,34 +455,27 @@ def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bo
                 print(f"RAPID failed to display error prompt: {e!r}")
                 return True
 
-        file_paths = [_normalize_path(p) for batch in all_batches for p in batch]
-        file_paths = [p for p in file_paths if p]
-        serializable_paths = [p for p in file_paths if len(p.encode("utf-8")) <= 0xFFFF]
+        serializable_paths: list[str] = []
+        for batch in all_batches:
+            for raw_path in batch:
+                normalized = _normalize_path(raw_path)
+                if normalized and len(normalized.encode("utf-8")) <= 0xFFFF:
+                    serializable_paths.append(normalized)
 
-        ext_counter: Counter[str] = Counter()
-        root_counter: Counter[str] = Counter()
-        for p in serializable_paths:
-            _, ext = os.path.splitext(p)
-            ext_key = ext.lower() if ext else "(no ext)"
-            ext_counter[ext_key] += 1
-            parts = p.split("\\")
-            root_counter[parts[0] if parts else ""] += 1
+        ext_counter, root_counter = _compute_path_counters(serializable_paths)
 
         build_time_ms = int(time.time() * 1000)
         metadata_payload = _serialize_metadata(build_time_ms, ext_counter, root_counter)
 
-        _pack_u32 = struct.Struct('<I')
-        _pack_u16 = struct.Struct('<H')
-        _pack_u64 = struct.Struct('<Q')
-        chunks = [RAP2_MAGIC, _pack_u32.pack(RAP2_VERSION), _pack_u32.pack(len(serializable_paths))]
+        chunks = [RAP2_MAGIC, PACK_U32.pack(RAP2_VERSION), PACK_U32.pack(len(serializable_paths))]
         for path in serializable_paths:
             encoded_path = path.encode('utf-8')
             path_hash = _compute_rapid_hash64(path)
-            chunks.append(_pack_u64.pack(path_hash))
-            chunks.append(_pack_u16.pack(len(encoded_path)))
+            chunks.append(PACK_U64.pack(path_hash))
+            chunks.append(PACK_U16.pack(len(encoded_path)))
             chunks.append(encoded_path)
         chunks.append(metadata_payload)
-        chunks.append(_pack_u32.pack(len(metadata_payload)))
+        chunks.append(PACK_U32.pack(len(metadata_payload)))
         binary_data = b''.join(chunks)
 
         compressed_data = zlib.compress(binary_data, level=1)
@@ -568,14 +546,7 @@ def read_cache_stats(
         build_time_ms, ext_counter, root_counter = parsed
     else:
         build_time_ms = None
-        ext_counter = Counter()
-        root_counter = Counter()
-        for p in paths:
-            _, ext = os.path.splitext(p)
-            ext_key = ext.lower() if ext else "(no ext)"
-            ext_counter[ext_key] += 1
-            parts = p.split("\\")
-            root_counter[parts[0] if parts else ""] += 1
+        ext_counter, root_counter = _compute_path_counters(paths)
 
     return (paths, ext_counter, root_counter, build_time_ms)
 
@@ -686,7 +657,7 @@ class PreLaunchGameHook(mobase.IPlugin):
             mobase.PluginSetting(
                 "extension_blacklist",
                 "File extensions to exclude from the cache (comma-separated). Pre-filled with defaults (plugins, archives, executables, etc.). Remove an extension to include it; add more to exclude.",
-                _default_excluded_extensions_setting()
+                ",".join(EXCLUDED_EXTENSIONS)
             ),
             mobase.PluginSetting(
                 "output_to_mod",
@@ -804,7 +775,7 @@ class RapidCacheViewerTool(mobase.IPluginTool):
     def display(self) -> None:
         parent = self._parentWidget() if hasattr(self, "_parentWidget") else None
         candidates = _get_cache_path_candidates(self._organizer, HOOK_PLUGIN_NAME)
-        cache_path = _find_existing_cache_path(candidates)
+        cache_path = next((path for path in candidates if os.path.isfile(path)), None)
         if cache_path is None:
             if not run_index_vfs(self._organizer, HOOK_PLUGIN_NAME):
                 return
