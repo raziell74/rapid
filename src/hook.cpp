@@ -6,6 +6,7 @@
 #include <zlib.h>
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -22,7 +23,29 @@ namespace RAPID::Hook
 		TraverseFn g_originalTraverse{ nullptr };
 		bool g_installed{ false };
 		bool g_cacheInjected{ false };
+		std::size_t g_lastInjectedCount{ 0 };
 		constexpr std::size_t kDoTraversePrefixVIndex = 5;
+
+		class CountingTraverser final : public RE::BSResource::LocationTraverser
+		{
+		public:
+			explicit CountingTraverser(RE::BSResource::LocationTraverser& a_inner)
+				: _inner(a_inner)
+			{
+			}
+
+			void ProcessName(const char* a_name, RE::BSResource::Location& a_location) override
+			{
+				++_count;
+				_inner.ProcessName(a_name, a_location);
+			}
+
+			std::size_t GetCount() const { return _count; }
+
+		private:
+			RE::BSResource::LocationTraverser& _inner;
+			std::size_t _count{ 0 };
+		};
 
 		std::uint32_t ReadU32LE(const std::vector<std::uint8_t>& bytes, std::size_t offset)
 		{
@@ -202,6 +225,7 @@ namespace RAPID::Hook
 			}
 
 			g_cacheInjected = true;
+			g_lastInjectedCount = successCount;
 			SKSE::log::info("RAPID injected {} loose-file paths into BSResource", successCount);
 			if (Settings::Get().verboseLogging && successCount > kVerbosePathCap) {
 				LogVerbose("RAPID registered first {} paths (total {}); remaining paths not logged", kVerbosePathCap, successCount);
@@ -209,10 +233,13 @@ namespace RAPID::Hook
 			return true;
 		}
 
-		bool TryInjectFromCache()
+		bool TryInjectFromCache(std::size_t* outInjectedCount = nullptr)
 		{
 			if (g_cacheInjected) {
 				LogVerbose("RAPID cache already injected, skipping load");
+				if (outInjectedCount) {
+					*outInjectedCount = g_lastInjectedCount;
+				}
 				return true;
 			}
 
@@ -237,7 +264,11 @@ namespace RAPID::Hook
 				return false;
 			}
 
-			return InjectEntriesIntoEntryDB(paths);
+			const bool ok = InjectEntriesIntoEntryDB(paths);
+			if (ok && outInjectedCount) {
+				*outInjectedCount = g_lastInjectedCount;
+			}
+			return ok;
 		}
 
 		RE::BSResource::ErrorCode HookedTraversePrefix(
@@ -250,11 +281,36 @@ namespace RAPID::Hook
 				LogVerbose("RAPID traverse hook first invocation path={}", a_path ? a_path : "(null)");
 				g_firstTraverseLogged = true;
 			}
-			if (Settings::Get().enabled && TryInjectFromCache()) {
-				return RE::BSResource::ErrorCode::kNone;
+
+			const bool perfDiag = Settings::Get().performanceDiagnostics;
+			const auto t0 = perfDiag ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+
+			if (Settings::Get().enabled) {
+				std::size_t injectedCount = 0;
+				if (TryInjectFromCache(perfDiag ? &injectedCount : nullptr)) {
+					if (perfDiag) {
+						const auto t1 = std::chrono::steady_clock::now();
+						const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+						LogPerformanceDiagnostics(true, "RAPID", injectedCount, ms);
+					}
+					return RE::BSResource::ErrorCode::kNone;
+				}
+				if (perfDiag) {
+					/* Fall through to vanilla; we'll log "Vanilla (cache unavailable)" */
+				}
 			}
 
 			if (g_originalTraverse) {
+				if (perfDiag) {
+					CountingTraverser countingTraverser(a_traverser);
+					const RE::BSResource::ErrorCode result =
+						g_originalTraverse(a_this, a_path, countingTraverser);
+					const auto t1 = std::chrono::steady_clock::now();
+					const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+					const char* mode = (Settings::Get().enabled ? "Vanilla (cache unavailable)" : "Vanilla");
+					LogPerformanceDiagnostics(false, mode, countingTraverser.GetCount(), ms);
+					return result;
+				}
 				return g_originalTraverse(a_this, a_path, a_traverser);
 			}
 
@@ -269,8 +325,8 @@ namespace RAPID::Hook
 			return true;
 		}
 
-		if (!Settings::Get().enabled) {
-			SKSE::log::info("RAPID hook install skipped: plugin disabled via settings");
+		if (!Settings::Get().enabled && !Settings::Get().performanceDiagnostics) {
+			SKSE::log::info("RAPID hook install skipped: plugin disabled and performance diagnostics disabled");
 			return false;
 		}
 

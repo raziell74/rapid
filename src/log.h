@@ -31,3 +31,13 @@ void LogVerbose(fmt::format_string<Args...> fmt, Args&&... args)
 		SKSE::log::info(fmt, std::forward<Args>(args)...);
 	}
 }
+
+inline void LogPerformanceDiagnostics(bool a_isRapidPath, const char* a_mode, std::size_t a_looseFileCount, double a_executionMs)
+{
+	const char* title = a_isRapidPath ? "RAPID Performance" : "Vanilla Performance";
+	SKSE::log::info("========== {} ==========", title);
+	SKSE::log::info("Mode: {}", a_mode);
+	SKSE::log::info("Loose file count: {}", a_looseFileCount);
+	SKSE::log::info("Execution time: {:.3f} ms", a_executionMs);
+	SKSE::log::info("========================================");
+}
