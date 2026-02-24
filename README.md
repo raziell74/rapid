@@ -1,71 +1,52 @@
+Here is the rewritten README for R.A.P.I.D., complete with a dash of programmer humor to ease the pain of Skyrim modding:
 
-# CommonLibSSE NG
+# R.A.P.I.D. (Resource Asset Path Indexing and Dispatch)
 
-Because this uses [CommonLibSSE NG](https://github.com/CharmedBaryon/CommonLibSSE-NG), it supports Skyrim SE, AE, GOG, and VR. 
+Welcome to **R.A.P.I.D.**, the mod that finally stops the Skyrim Creation Engine from asking Windows "Are we there yet?" 100,000 times before the main menu even loads.
 
-Hook IDs and offsets must still be found manually for each version.
+R.A.P.I.D. is a two-part performance optimization framework for Skyrim Special Edition / Anniversary Edition and Mod Organizer 2. It fundamentally rewrites how the engine's `BSResource` subsystem discovers and indexes loose files during the initial boot sequence. By completely bypassing the operating system's native file enumeration APIs and skipping the heavy interception overhead of Mod Organizer 2's User Space Virtual File System (USVFS), R.A.P.I.D. achieves near-instant, O(1) loose file registration. Because the only thing that should take five minutes to load is deciding on your character's nose shape.
 
-# Requirements
+## The Loose File Bottleneck
 
-- [Visual Studio 2022](https://visualstudio.microsoft.com/) (_the free Community edition_) or [Visual Studio Code](https://code.visualstudio.com/)
-- [`vcpkg`](https://github.com/microsoft/vcpkg)
-  - 1. Clone the repository using git OR [download it as a .zip](https://github.com/microsoft/vcpkg/archive/refs/heads/master.zip)
-  - 2. Go into the `vcpkg` folder and double-click on `bootstrap-vcpkg.bat`
-  - 3. Edit your system or user Environment Variables and add a new one:
-    - Name: `VCPKG_ROOT`  
-      Value: `C:\path\to\wherever\your\vcpkg\folder\is`
-  - The latest version of vcpkg needs a default repository defined in the json. If you're using an older version of vcpkg, simply delete the default repository definition in `vcpkg-configuration.json`
+When Skyrim launches, it builds a Virtual File System (VFS). Bethesda Softworks Archives (BSAs) are the golden children here—they load blazingly fast because the engine just reads a single, highly compressed binary header.
 
-## Opening the project
+"Loose files," on the other hand, are the problem children. To find them, the engine insists on manually crawling your physical storage drive using ancient Windows APIs like `FindFirstFile` and `FindNextFile`. Add 100,000+ loose 4K sweetroll textures to your load order, and throw in Mod Organizer 2's USVFS proxy—which has to individually intercept, translate, and return every single one of those API calls—and suddenly your CPU is crying, your disk is thrashing, and you're staring at a black screen wondering if your PC finally gave up on life.
 
-Once you have Visual Studio 2022 installed, you can open this folder in basically any C++ editor, e.g. [VS Code](https://code.visualstudio.com/) or [CLion](https://www.jetbrains.com/clion/) or [Visual Studio](https://visualstudio.microsoft.com/)
-- > _for VS Code, if you are not automatically prompted to install the [C++](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools) and [CMake Tools](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cmake-tools) extensions, please install those and then close VS Code and then open this project as a folder in VS Code_
+## The Solution
 
-You may need to click `OK` on a few windows, but the project should automatically run CMake!
+R.A.P.I.D. fixes this by treating your chaotic pile of loose files exactly like a highly-optimized BSA archive. We achieve this with a two-step handshake:
 
-It will _automatically_ download [CommonLibSSE NG](https://github.com/CharmedBaryon/CommonLibSSE-NG) and everything you need to get started making your new plugin!
+### 1. The MO2 Python Plugin (The Indexer)
 
-# Project setup
+Before `SkyrimSE.exe` even realizes it's alive, the R.A.P.I.D. MO2 plugin swoops in. It taps into the `mobase.IFileTree` interface to instantly grab the final, conflict-resolved state of your virtual `Data` directory. It then serializes this tree into a highly compressed binary cache file (essentially a fake BSA header for your loose files) and gently places it into your active MO2 profile.
 
-By default, when this project compiles it will output a `.dll` for your SKSE plugin into the `build/` folder.
+### 2. The SKSE CommonLibSSE-NG Plugin (The Injector)
 
-If you want to configure this project to output your plugin files
-into your Skyrim Special Edition's "`Data`" folder:
+Once the game actually launches, the R.A.P.I.D. SKSE plugin uses `CommonLibSSE-NG` and the Address Library to execute a Trampoline hook right into the `BSResource::LooseFileLocation` directory traversal routines.
 
-- Set the `SKYRIM_FOLDER` environment variable to the path of your Skyrim installation  
-  e.g. `C:\Program Files (x86)\Steam\steamapps\common\Skyrim Special Edition`
+Instead of letting the engine painfully interrogating Windows for files, we intercept the call, slam our pre-generated binary cache into memory, and manually populate the `BSResource::EntryDB` hash maps with your asset paths. The engine is happily tricked into believing it just successfully enumerated the hard drive. We bypass the USVFS proxy overhead entirely, turning a process that takes minutes into a process that takes milliseconds. *It just works.*
 
-If you want to configure this project to output your plugin files
-into your "`mods`" folder:  
-(_for Mod Organizer 2 or Vortex_)
+## Requirements
 
-- Set the `SKYRIM_MODS_FOLDER` environment variable to the path of your mods folder:  
-  e.g. `C:\Users\<user>\AppData\Local\ModOrganizer\Skyrim Special Edition\mods`  
-  e.g. `C:\Users\<user>\AppData\Roaming\Vortex\skyrimse\mods`
+* **Skyrim Special Edition or Anniversary Edition** (Supports 1.5.97, 1.6.xx, and VR via CommonLibSSE-NG cross-version magic).
+* **SKSE64** (You know the drill).
+* **Address Library for SKSE Plugins** (Because hardcoding offsets is so 2013).
+* **Mod Organizer 2** (Version 2.3.0 or higher required for full Python module support). *Note: Vortex is not supported. Sorry, Vortex users, we need MO2's specific VFS brain for this one. Get Wrecked Vortex*
 
-# Debugging
-In order to attach a debugger, you must own a legal copy of Skyrim with the exe stripped using Steamless. Note that users with MO2 should have `-forcesteamloader` as an SKSE argument for plugins to load normally with a stub-removed exe.
+## Installation
 
-For VSCode users, they must have a `launch.json` file like the one below:
+Because this mod relies on two completely different environments (MO2 and SKSE), the installation requires a brief manual step alongside your standard mod manager download.
 
-```json
+**Step 1: Install the SKSE Injector Plugin (Main File)**
 
-{
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "C++ Debugger",
-            "type": "cppvsdbg",
-            "request": "attach"
-        },
-        {
-            "type": "cmake",
-            "request": "launch",
-            "name": "Debug portfile(s)",
-            "cmakeDebugType": "external",
-            "pipeName": "\\\\.\\pipe\\vcpkg_ext_portfile_dbg",
-            "preLaunchTask": "Debug vcpkg commands"
-        }
-    ]
-}
-```
+1. On the R.A.P.I.D. Nexus Mods page, navigate to the Files tab.
+2. Click **Mod Manager Download** under the Main Files section for `RAPID SKSE Plugin`.
+3. Install and enable it in Mod Organizer 2 just like any other standard mod. Ensure the checkbox in your left pane is ticked.
+
+**Step 2: Install the MO2 Indexer Plugin (Miscellaneous File)**
+_MO2 plugins operate at the application level, not inside the virtual game folder, so this part must be placed manually._
+
+1. On the Nexus Mods page, click Manual Download under the Miscellaneous/Optional Files section for the `RAPID MO2 Plugin`.
+2. Extract the downloaded archive. Move the Python script directly into your Mod Organizer 2 plugins folder (e.g., `C:\Modding\MO2\plugins\`).
+3. Restart Mod Organizer 2.
+4. Verify it's installed by clicking the Tools -> Tool Plugins menu at the top of MO2. Ensure the setting to "Run automatically on executable launch" is enabled so it can work its magic in the background.
