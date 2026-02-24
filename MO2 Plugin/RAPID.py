@@ -68,6 +68,12 @@ class PreLaunchGameHook(mobase.IPlugin):
                 "extension_whitelist",
                 "Additional file extensions to index (comma-separated, e.g. .foo,.bar). Added to the built-in BSA-style default. Leave empty to use only the default.",
                 ""
+            ),
+            mobase.PluginSetting(
+                "output_to_mod",
+                "Where to write the cache file. Leave empty or type 'Overwrite' for MO2's Overwrite folder (default). "
+                "To write into a specific mod, type the exact mod name as shown in the left pane.",
+                ""
             )
         ]
 
@@ -86,6 +92,27 @@ class PreLaunchGameHook(mobase.IPlugin):
                     seen.add(ext)
                     result.append(ext)
         return tuple(result)
+
+    def _get_output_directory(self) -> str:
+        """Resolve the output base directory from the output_to_mod setting (Overwrite or a mod name)."""
+        raw = self._organizer.pluginSetting(self.name(), "output_to_mod")
+        if raw is None:
+            raw = ""
+        value = (raw or "").strip()
+        if not value or value.lower() == "overwrite" or value == "__overwrite__":
+            return self._organizer.overwritePath()
+        mod_list = self._organizer.modList()
+        mod = mod_list.getMod(value)
+        if mod is not None:
+            return mod.absolutePath()
+        for internal_name in mod_list.allMods():
+            if mod_list.displayName(internal_name) == value:
+                mod = mod_list.getMod(internal_name)
+                if mod is not None:
+                    return mod.absolutePath()
+                break
+        print(f"RAPID: unknown output mod {value!r}, using Overwrite.")
+        return self._organizer.overwritePath()
 
     def _on_setting_changed(self, plugin_name: str, key: str, old_value, new_value) -> None:
         if plugin_name != self.name() or key != "worker_threads":
@@ -308,8 +335,11 @@ class PreLaunchGameHook(mobase.IPlugin):
                 print("RAPID cache write canceled by user; launching without RAPID cache.")
                 return True
 
-            game_data_path = self._organizer.managedGame().dataDirectory().absolutePath()
-            output_path = os.path.join(game_data_path, "rapid_vfs_cache.bin")
+            output_dir = self._get_output_directory()
+            if not os.path.isdir(output_dir):
+                self._organizer.setPluginSetting(self.name(), "output_to_mod", "")
+                output_dir = self._organizer.overwritePath()
+            output_path = os.path.join(output_dir, "rapid_vfs_cache.bin")
             with open(output_path, "wb") as f:
                 f.write(compressed_data)
 
