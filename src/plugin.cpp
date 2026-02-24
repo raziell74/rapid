@@ -5,11 +5,13 @@
 
 void OnDataLoaded()
 {
+	LogVerbose("RAPID OnDataLoaded: installing traversal hook");
 	RAPID::Hook::Install();
 }
 
 void MessageHandler(SKSE::MessagingInterface::Message* a_msg)
 {
+	LogVerbose("RAPID received SKSE message: {}", static_cast<std::uint32_t>(a_msg->type));
 	switch (a_msg->type) {
 	case SKSE::MessagingInterface::kDataLoaded:
 		OnDataLoaded();

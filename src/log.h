@@ -1,8 +1,11 @@
 #pragma once
 
+#include <fmt/core.h>
 #include <spdlog/sinks/basic_file_sink.h>
 
-void SetupLog() {
+#include "settings.h"
+
+inline void SetupLog() {
     auto logsFolder = SKSE::log::log_directory();
     if (!logsFolder) SKSE::stl::report_and_fail("SKSE log_directory not provided, logs disabled.");
     auto pluginName = SKSE::PluginDeclaration::GetSingleton()->GetName();
@@ -12,4 +15,19 @@ void SetupLog() {
     spdlog::set_default_logger(std::move(loggerPtr));
     spdlog::set_level(spdlog::level::trace);
     spdlog::flush_on(spdlog::level::trace);
+}
+
+inline void LogVerbose(const char* msg)
+{
+	if (RAPID::Settings::Get().verboseLogging) {
+		SKSE::log::info("{}", msg);
+	}
+}
+
+template<typename... Args>
+void LogVerbose(fmt::format_string<Args...> fmt, Args&&... args)
+{
+	if (RAPID::Settings::Get().verboseLogging) {
+		SKSE::log::info(fmt, std::forward<Args>(args)...);
+	}
 }

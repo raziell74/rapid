@@ -9,7 +9,7 @@ namespace RAPID::Settings
 	struct Config
 	{
 		bool enabled{ true };
-		bool verboseStats{ true };
+		bool verboseLogging{ true };
 	};
 
 	inline Config& Get()
@@ -48,7 +48,7 @@ namespace RAPID::Settings
 		CSimpleIniA ini;
 		ini.SetUnicode();
 		ini.SetBoolValue("General", "Enabled", true);
-		ini.SetBoolValue("General", "VerboseStats", true);
+		ini.SetBoolValue("General", "VerboseLogging", true);
 		const auto rc = ini.SaveFile(iniPath.string().c_str());
 		if (rc < 0) {
 			SKSE::log::error("Failed to create default INI at {}", iniPath.string());
@@ -81,13 +81,13 @@ namespace RAPID::Settings
 
 		auto& config = Get();
 		config.enabled = ini.GetBoolValue("General", "Enabled", true);
-		config.verboseStats = ini.GetBoolValue("General", "VerboseStats", true);
+		config.verboseLogging = ini.GetBoolValue("General", "VerboseLogging", true);
 
 		SKSE::log::info(
-			"Settings loaded from {} (enabled={}, verboseStats={})",
+			"Settings loaded from {} (enabled={}, verboseLogging={})",
 			iniPath.string(),
 			config.enabled,
-			config.verboseStats);
+			config.verboseLogging);
 
 		return true;
 	}

@@ -1,5 +1,6 @@
 #include "hook.h"
 
+#include "log.h"
 #include "settings.h"
 
 #include <zlib.h>
@@ -65,11 +66,13 @@ namespace RAPID::Hook
 				return false;
 			}
 
+			LogVerbose("RAPID cache read path={} size={}", cachePath.string(), static_cast<std::size_t>(fileSize));
 			return true;
 		}
 
 		bool InflateCache(const std::vector<std::uint8_t>& compressed, std::vector<std::uint8_t>& uncompressed)
 		{
+			LogVerbose("RAPID inflate start compressedSize={}", compressed.size());
 			z_stream stream{};
 			stream.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(compressed.data()));
 			stream.avail_in = static_cast<uInt>(compressed.size());
@@ -99,6 +102,7 @@ namespace RAPID::Hook
 			} while (inflateResult != Z_STREAM_END);
 
 			inflateEnd(&stream);
+			LogVerbose("RAPID inflate done uncompressedSize={}", uncompressed.size());
 			return true;
 		}
 
@@ -109,12 +113,14 @@ namespace RAPID::Hook
 
 		bool ParseCacheEntries(const std::vector<std::uint8_t>& data, std::vector<std::string>& outPaths)
 		{
+			LogVerbose("RAPID parsing cache entries payloadSize={}", data.size());
 			if (data.size() < sizeof(std::uint32_t)) {
 				SKSE::log::error("RAPID cache payload too small for header");
 				return false;
 			}
 
 			const auto expectedCount = ReadU32LE(data, 0);
+			LogVerbose("RAPID cache expectedEntryCount={}", expectedCount);
 			std::size_t cursor = sizeof(std::uint32_t);
 			std::size_t malformedCount = 0;
 
@@ -155,15 +161,15 @@ namespace RAPID::Hook
 					data.size() - cursor);
 			}
 
-			if (Settings::Get().verboseStats) {
-				SKSE::log::info(
+			if (Settings::Get().verboseLogging) {
+				LogVerbose(
 					"RAPID cache parsed entries={} malformed={} bytes={}",
 					outPaths.size(),
 					malformedCount,
 					data.size());
 
 				for (std::size_t i = 0; i < outPaths.size(); ++i) {
-					SKSE::log::info("RAPID filetree [{} / {}] {}", i + 1, outPaths.size(), outPaths[i]);
+					LogVerbose("RAPID filetree [{} / {}] {}", i + 1, outPaths.size(), outPaths[i]);
 				}
 			}
 
@@ -177,12 +183,16 @@ namespace RAPID::Hook
 				return false;
 			}
 
+			constexpr std::size_t kVerbosePathCap = 50;
 			std::size_t successCount = 0;
 			for (const auto& path : paths) {
 				if (path.empty()) {
 					continue;
 				}
 				RE::BSResource::RegisterGlobalPath(path.c_str());
+				if (Settings::Get().verboseLogging && successCount < kVerbosePathCap) {
+					LogVerbose("RAPID register path [{}] {}", successCount + 1, path);
+				}
 				++successCount;
 			}
 
@@ -193,15 +203,20 @@ namespace RAPID::Hook
 
 			g_cacheInjected = true;
 			SKSE::log::info("RAPID injected {} loose-file paths into BSResource", successCount);
+			if (Settings::Get().verboseLogging && successCount > kVerbosePathCap) {
+				LogVerbose("RAPID registered first {} paths (total {}); remaining paths not logged", kVerbosePathCap, successCount);
+			}
 			return true;
 		}
 
 		bool TryInjectFromCache()
 		{
 			if (g_cacheInjected) {
+				LogVerbose("RAPID cache already injected, skipping load");
 				return true;
 			}
 
+			LogVerbose("RAPID loading cache...");
 			std::vector<std::uint8_t> compressed;
 			if (!ReadCompressedCache(compressed)) {
 				return false;
@@ -212,12 +227,10 @@ namespace RAPID::Hook
 				return false;
 			}
 
-			if (Settings::Get().verboseStats) {
-				SKSE::log::info(
-					"RAPID cache decompressed compressedBytes={} uncompressedBytes={}",
-					compressed.size(),
-					uncompressed.size());
-			}
+			LogVerbose(
+				"RAPID cache decompressed compressedBytes={} uncompressedBytes={}",
+				compressed.size(),
+				uncompressed.size());
 
 			std::vector<std::string> paths;
 			if (!ParseCacheEntries(uncompressed, paths)) {
@@ -232,6 +245,11 @@ namespace RAPID::Hook
 			const char* a_path,
 			RE::BSResource::LocationTraverser& a_traverser)
 		{
+			static bool g_firstTraverseLogged = false;
+			if (Settings::Get().verboseLogging && !g_firstTraverseLogged) {
+				LogVerbose("RAPID traverse hook first invocation path={}", a_path ? a_path : "(null)");
+				g_firstTraverseLogged = true;
+			}
 			if (Settings::Get().enabled && TryInjectFromCache()) {
 				return RE::BSResource::ErrorCode::kNone;
 			}
@@ -272,6 +290,7 @@ namespace RAPID::Hook
 		}
 
 		SKSE::log::info("RAPID traversal hook installed");
+		LogVerbose("RAPID traversal hook installed at vfunc 5");
 		return true;
 	}
 

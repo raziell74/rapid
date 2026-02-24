@@ -112,12 +112,20 @@ class PreLaunchGameHook(mobase.IPlugin):
         return result == QMessageBox.StandardButton.Yes
 
     def _create_progress_dialog(self) -> QProgressDialog:
-        dialog = QProgressDialog("Indexing virtual files...", "Cancel", 0, 1)
-        dialog.setWindowTitle("RAPID Indexing")
+        dialog = QProgressDialog("Scanning virtual file system…", "Cancel", 0, 1)
+        dialog.setWindowTitle("RAPID - Indexing Loose Files")
         dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dialog.setWindowFlags(dialog.windowFlags() | Qt.WindowType.Dialog)
         dialog.setMinimumDuration(0)
         dialog.setAutoClose(False)
         dialog.setAutoReset(False)
+        dialog.setMinimumWidth(440)
+        dialog.setMinimumHeight(140)
+        # Theme-safe spacing only; no colors so MO2 light/dark theme is preserved.
+        dialog.setStyleSheet(
+            "QProgressDialog { padding: 14px; }\n"
+            "QProgressBar { min-height: 10px; }"
+        )
         return dialog
 
     def _update_progress_dialog(
@@ -125,14 +133,23 @@ class PreLaunchGameHook(mobase.IPlugin):
         dialog: QProgressDialog,
         label_text: str,
         value: int,
-        maximum: int
+        maximum: int,
+        *,
+        indeterminate: bool = False
     ) -> bool:
-        maximum = max(1, maximum)
-        value = max(0, min(value, maximum))
         dialog.setLabelText(label_text)
-        if dialog.maximum() != maximum:
-            dialog.setMaximum(maximum)
-        dialog.setValue(value)
+        if indeterminate:
+            # Qt: min=max=0 shows busy indicator. Ensure we're in indeterminate mode.
+            dialog.setMinimum(0)
+            dialog.setMaximum(0)
+            dialog.setValue(0)
+        else:
+            maximum = max(1, maximum)
+            value = max(0, min(value, maximum))
+            dialog.setMinimum(0)
+            if dialog.maximum() != maximum:
+                dialog.setMaximum(maximum)
+            dialog.setValue(value)
         QApplication.processEvents()
         return dialog.wasCanceled()
 
@@ -221,11 +238,23 @@ class PreLaunchGameHook(mobase.IPlugin):
                     with progress_lock:
                         current_processed = processed_dirs
                         current_discovered = discovered_dirs
+                    if current_discovered == 0:
+                        label = "Scanning virtual file system"
+                        use_indeterminate = True
+                    else:
+                        total = max(1, current_discovered)
+                        pct = (100 * current_processed) // total
+                        label = (
+                            "Scanning virtual file system\n"
+                            f"{current_processed:,} / {current_discovered:,} directories ({pct}%)"
+                        )
+                        use_indeterminate = False
                     if self._update_progress_dialog(
                         progress_dialog,
-                        f"Indexing virtual files... ({current_processed} dirs scanned)",
+                        label,
                         current_processed,
-                        current_discovered
+                        current_discovered,
+                        indeterminate=use_indeterminate,
                     ):
                         cancel_event.set()
                     last_update = now
@@ -246,7 +275,9 @@ class PreLaunchGameHook(mobase.IPlugin):
                 print("RAPID indexing canceled by user; launching without RAPID cache.")
                 return True
 
-            if self._update_progress_dialog(progress_dialog, "Building RAPID cache...", 0, 1):
+            if self._update_progress_dialog(
+                progress_dialog, "Building RAPID cache…", 0, 1, indeterminate=True
+            ):
                 print("RAPID cache build canceled by user; launching without RAPID cache.")
                 return True
 
@@ -271,7 +302,9 @@ class PreLaunchGameHook(mobase.IPlugin):
 
             compressed_data = zlib.compress(binary_data, level=1)
 
-            if self._update_progress_dialog(progress_dialog, "Writing RAPID cache...", 1, 1):
+            if self._update_progress_dialog(
+                progress_dialog, "Writing cache to disk…", 0, 1, indeterminate=True
+            ):
                 print("RAPID cache write canceled by user; launching without RAPID cache.")
                 return True
 
@@ -280,7 +313,9 @@ class PreLaunchGameHook(mobase.IPlugin):
             with open(output_path, "wb") as f:
                 f.write(compressed_data)
 
-            self._update_progress_dialog(progress_dialog, "RAPID cache complete.", 1, 1)
+            self._update_progress_dialog(
+                progress_dialog, "RAPID cache complete.", 1, 1, indeterminate=False
+            )
             print(f"RAPID Cache built successfully! Indexed {len(file_paths)} loose files.")
             return True
         finally:
