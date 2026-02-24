@@ -29,21 +29,17 @@ from PyQt6.QtWidgets import (
 HOOK_PLUGIN_NAME = "RAPID - Pre-Launch Game Hook"
 CACHE_FILENAME = "rapid_vfs_cache.bin"
 
-ALLOWED_EXTENSIONS = (
-    '.nif', '.tri', '.egm', '.egt', '.btr', '.bto', '.lod',  # Meshes & Geometry
-    '.dds', '.tga',                                          # Textures
-    '.wav', '.xwm', '.fuz', '.lip',                          # Audio
-    '.hkx', '.btt',                                          # Animations & Behavior
-    '.pex', '.seq',                                          # Scripts & Logic
-    '.swf',                                                  # Interface
-    '.ini', '.json', '.toml', '.xml',                        # Config (Papyrus extenders, HDT, MCM)
-    '.bat',                                                  # Console-callable
-    '.bik, .mp4',                                            # Video
-    '.strings', '.dlstrings', '.ilstrings',                  # Localization
-    '.jslot', '.osp',                                        # Presets (RaceMenu, BodySlide)
-    '.ttf', '.otf',                                          # Fonts
-    '.bgsm', '.bgem',                                        # Materials
-    '.osd',                                                  # Object/scene data
+EXCLUDED_EXTENSIONS = (
+    '.esp', '.esm', '.esl',                                  # Plugins (load order)
+    '.bsa', '.ba2',                                          # Archives (mounted separately)
+    '.exe', '.dll', '.asi',                                  # Executables / code
+    '.skse',                                                 # Plugin metadata
+    '.pdb', '.cdx',                                          # Debug / build
+    '.md', '.pdf',                                           # Documentation
+    '.bak', '.tmp', '.temp', '.orig',                        # Backup / temp
+    '.log',                                                  # Logs
+    '.gitignore', '.gitattributes',                          # Version control / IDE
+    '.manifest', '.url', '.lnk',                             # Installer / shortcuts
 )
 
 def get_rapid_cache_path(organizer: mobase.IOrganizer, settings_plugin_name: str) -> str:
@@ -73,10 +69,9 @@ def get_rapid_cache_path(organizer: mobase.IOrganizer, settings_plugin_name: str
     return os.path.join(base_dir, CACHE_FILENAME)
 
 
-def _get_allowed_extensions_for_settings(organizer: mobase.IOrganizer, settings_plugin_name: str) -> tuple[str, ...]:
-    result: list[str] = list(ALLOWED_EXTENSIONS)
-    seen: set[str] = set(ALLOWED_EXTENSIONS)
-    raw = organizer.pluginSetting(settings_plugin_name, "extension_whitelist")
+def _get_excluded_extensions_for_settings(organizer: mobase.IOrganizer, settings_plugin_name: str) -> frozenset[str]:
+    excluded: set[str] = set(EXCLUDED_EXTENSIONS)
+    raw = organizer.pluginSetting(settings_plugin_name, "extension_blacklist")
     if raw and raw.strip():
         for part in raw.split(","):
             ext = part.strip().lower()
@@ -84,10 +79,8 @@ def _get_allowed_extensions_for_settings(organizer: mobase.IOrganizer, settings_
                 continue
             if not ext.startswith("."):
                 ext = "." + ext
-            if ext not in seen:
-                seen.add(ext)
-                result.append(ext)
-    return tuple(result)
+            excluded.add(ext)
+    return frozenset(excluded)
 
 
 def _create_progress_dialog() -> QProgressDialog:
@@ -151,7 +144,7 @@ def _prompt_continue_without_rapid(errors: list[str]) -> bool:
 def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bool:
     """Run VFS indexing and write rapid_vfs_cache.bin to the configured output (Overwrite or named mod)."""
     vfs_tree = organizer.virtualFileTree()
-    allowed_extensions = _get_allowed_extensions_for_settings(organizer, settings_plugin_name)
+    excluded_extensions = _get_excluded_extensions_for_settings(organizer, settings_plugin_name)
 
     dir_queue = queue.Queue()
     root_files = []
@@ -159,7 +152,8 @@ def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bo
         if entry.isDir():
             dir_queue.put(entry)
         else:
-            if entry.name().lower().endswith(allowed_extensions):
+            ext = os.path.splitext(entry.name())[1].lower()
+            if ext not in excluded_extensions:
                 root_files.append(entry.path('\\'))
 
     cpu_count = os.cpu_count() or 4
@@ -201,7 +195,8 @@ def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bo
                         with progress_lock:
                             discovered_dirs += 1
                     else:
-                        if entry.name().lower().endswith(allowed_extensions):
+                        ext = os.path.splitext(entry.name())[1].lower()
+                        if ext not in excluded_extensions:
                             local_paths.append(entry.path('\\'))
             except Exception as e:
                 error_message = f"Worker failed while indexing VFS node: {e!r}"
@@ -480,8 +475,9 @@ class PreLaunchGameHook(mobase.IPlugin):
                 min(8, cpu_count)
             ),
             mobase.PluginSetting(
-                "extension_whitelist",
-                "Additional file extensions to index (comma-separated, e.g. .foo,.bar). Added to the built-in BSA-style default. Leave empty to use only the default.",
+                "extension_blacklist",
+                "Additional file extensions to exclude from the cache (comma-separated, e.g. .foo,.bar). "
+                "Built-in list excludes plugins, archives, executables, debug, docs, backup/temp, and logs. Leave empty to use only the built-in list.",
                 ""
             ),
             mobase.PluginSetting(
