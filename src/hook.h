@@ -23,11 +23,6 @@ namespace RAPID::Hooks
 
         static void Install()
         {
-            // Populate cache before hook is active so it's ready on first traversal.
-            if (!RAPID::GetLooseFileCache().Load()) {
-                SKSE::log::warn("R.A.P.I.D. cache failed to load at hook install; will fall back to native crawl until next load.");
-            }
-
             REL::Relocation<std::uintptr_t> vtable{ RE::VTABLE_BSResource__LooseFileLocation[0] };
             
             // 2. Write the hook, and strictly cast the returned vanilla address to our function pointer type.
@@ -44,18 +39,12 @@ namespace RAPID::Hooks
             const char* a_path, 
             RE::BSResource::LocationTraverser& a_traverser)
         {
-            const char* currentPath = a_path ? a_path : "ROOT";
-            SKSE::log::info("R.A.P.I.D. Intercepted VFS traversal for path: {}", currentPath);
-
             bool isCacheInjected = TryInjectLooseFileCache(a_this, a_traverser, a_path);
 
             if (isCacheInjected) {
                 return RE::BSResource::ErrorCode::kNone; 
             }
 
-            SKSE::log::warn("R.A.P.I.D. Cache failed. Falling back to native directory crawl.");
-            
-            // 3. Call the original function using our raw pointer
             return _DoTraversePrefix(a_this, a_path, a_traverser);
         }
 

@@ -2,8 +2,6 @@
 
 #include "PCH.h"
 
-#include <atomic>
-
 namespace RAPID
 {
 	class RapidLocation final : public RE::BSResource::Location
@@ -44,12 +42,6 @@ namespace RAPID
 		bool IsRegistered() const;
 
 	private:
-		bool ShouldLogHotPath() const;
-
-		std::atomic<std::uint64_t> _requests{ 0 };
-		std::atomic<std::uint64_t> _hits{ 0 };
-		std::atomic<std::uint64_t> _misses{ 0 };
-		std::atomic<std::uint64_t> _collisions{ 0 };
 		RE::BSResource::LooseFileLocation* _looseLocation{ nullptr };
 		bool _registered{ false };
 	};

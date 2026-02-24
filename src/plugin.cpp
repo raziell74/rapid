@@ -29,14 +29,6 @@ SKSEPluginLoad(const SKSE::LoadInterface *skse) {
 		SKSE::log::error("RAPID settings failed to load; plugin continuing with defaults");
 	}
 
-	auto& cache = RAPID::GetLooseFileCache();
-	const bool cacheLoaded = cache.Load();
-	SKSE::log::info(
-		"R.A.P.I.D. cache load {} entries={} format={}",
-		cacheLoaded ? "ok" : "failed",
-		cache.GetEntryCount(),
-		static_cast<std::uint32_t>(cache.GetFormat()));
-
 	auto& rapidLocation = RAPID::GetRapidLocation();
 	const bool locationRegistered = rapidLocation.Register();
 	SKSE::log::info(

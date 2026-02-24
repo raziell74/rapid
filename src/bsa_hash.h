@@ -58,23 +58,6 @@ namespace RAPID
 		return normalized;
 	}
 
-	inline std::string NormalizeTraversalPrefix(const char* traversalPath)
-	{
-		if (!traversalPath || traversalPath[0] == '\0') {
-			return {};
-		}
-
-		std::string prefix = NormalizePath(traversalPath);
-		constexpr std::string_view kDataRoot = "data\\root";
-		if (prefix == kDataRoot) {
-			return {};
-		}
-		if (!prefix.empty() && prefix.back() != '\\') {
-			prefix.push_back('\\');
-		}
-		return prefix;
-	}
-
 	inline std::uint64_t ComputeRapidHash64(std::string_view canonicalPath)
 	{
 		std::string normalized(canonicalPath);

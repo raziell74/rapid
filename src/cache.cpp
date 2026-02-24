@@ -5,7 +5,6 @@
 
 #include <zlib.h>
 
-#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -203,8 +202,6 @@ namespace RAPID
 			return false;
 		}
 
-		std::ranges::sort(_paths);
-
 		_hashToPathIndexes.clear();
 		_hashToPathIndexes.reserve(_paths.size());
 		for (std::uint32_t i = 0; i < _paths.size(); ++i) {
@@ -222,38 +219,12 @@ namespace RAPID
 		return true;
 	}
 
-	std::span<const std::string> LooseFileCache::GetPathsForPrefix(const char* traversalPath)
+	std::span<const std::string> LooseFileCache::GetAllPaths() const
 	{
 		if (!_loaded || _paths.empty()) {
 			return {};
 		}
-
-		const std::string prefix = NormalizeTraversalPrefix(traversalPath);
-
-		if (prefix.empty()) {
-			return std::span<const std::string>(_paths);
-		}
-
-		std::string prefixEnd = prefix;
-		prefixEnd.back() = static_cast<char>(static_cast<unsigned char>(prefixEnd.back()) + 1);
-
-		const auto itStart = std::lower_bound(_paths.begin(), _paths.end(), prefix);
-		const auto itEnd = std::lower_bound(itStart, _paths.end(), prefixEnd);
-		const std::size_t matchCount = static_cast<std::size_t>(itEnd - itStart);
-
-		if (matchCount == 0) {
-			static bool loggedPrefixMismatch = false;
-			if (Settings::Get().verboseLogging && !loggedPrefixMismatch) {
-				loggedPrefixMismatch = true;
-				SKSE::log::info(
-					"R.A.P.I.D. GetPathsForPrefix normalized prefix \"{}\" matched 0 paths (cache size {}; first cache path: \"{}\")",
-					prefix,
-					_paths.size(),
-					_paths.front());
-			}
-		}
-
-		return std::span<const std::string>(itStart, itEnd);
+		return std::span<const std::string>(_paths);
 	}
 
 	ResolveResult LooseFileCache::ResolvePath(const char* path) const

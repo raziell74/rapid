@@ -1,34 +1,19 @@
 #include "location.h"
 
-#include "bsa_hash.h"
 #include "cache.h"
 #include "settings.h"
 
 namespace RAPID
 {
-	namespace
-	{
-		constexpr std::uint64_t kDetailedHotPathLogs = 100;
-		constexpr std::uint64_t kPeriodicHotPathLogs = 5000;
-	}
-
 	RE::BSResource::ErrorCode RapidLocation::DoCreateStream(
 		const char* a_path,
 		RE::BSTSmartPointer<RE::BSResource::Stream>& a_stream,
 		RE::BSResource::Location*& a_location,
 		bool a_readOnly)
 	{
-		const auto requestCount = _requests.fetch_add(1) + 1;
-		const std::string normalizedInput = NormalizePath(a_path ? a_path : "");
-		const std::uint64_t inputHash = normalizedInput.empty() ? 0 : ComputeRapidHash64(normalizedInput);
 		const ResolveResult resolve = GetLooseFileCache().ResolvePath(a_path);
 		if (!resolve.path) {
-			_misses.fetch_add(1);
 			return RE::BSResource::ErrorCode::kNotExist;
-		}
-
-		if (resolve.collisionCandidates > 1) {
-			_collisions.fetch_add(1);
 		}
 
 		if (!_looseLocation) {
@@ -36,14 +21,7 @@ namespace RAPID
 			return RE::BSResource::ErrorCode::kUnsupported;
 		}
 
-		const auto result = _looseLocation->DoCreateStream(resolve.path->c_str(), a_stream, a_location, a_readOnly);
-		if (result == RE::BSResource::ErrorCode::kNone) {
-			_hits.fetch_add(1);
-		} else {
-			_misses.fetch_add(1);
-		}
-
-		return result;
+		return _looseLocation->DoCreateStream(resolve.path->c_str(), a_stream, a_location, a_readOnly);
 	}
 
 	RE::BSResource::ErrorCode RapidLocation::DoCreateAsyncStream(
@@ -63,7 +41,8 @@ namespace RAPID
 		const char* a_path,
 		RE::BSResource::LocationTraverser& a_traverser)
 	{
-		const std::span<const std::string> paths = GetLooseFileCache().GetPathsForPrefix(a_path);
+		(void)a_path;
+		const std::span<const std::string> paths = GetLooseFileCache().GetAllPaths();
 		if (paths.empty()) {
 			return RE::BSResource::ErrorCode::kNotExist;
 		}

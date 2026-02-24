@@ -25,7 +25,7 @@ namespace RAPID
 	{
 	public:
 		bool Load();
-		std::span<const std::string> GetPathsForPrefix(const char* traversalPath);
+		std::span<const std::string> GetAllPaths() const;
 		ResolveResult ResolvePath(const char* path) const;
 		std::size_t GetEntryCount() const;
 		CacheFormat GetFormat() const;
