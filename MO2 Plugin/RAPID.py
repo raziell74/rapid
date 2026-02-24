@@ -30,6 +30,12 @@ from PyQt6.QtWidgets import (
 HOOK_PLUGIN_NAME = "RAPID - Pre-Launch Game Hook"
 CACHE_FILENAME = "rapid_vfs_cache.bin"
 
+# Unused - Need to do more in game logging to determine if there are more directories used by the engine.
+# ENGINE_DATA_SUBDIRS = frozenset({
+#     "textures","meshes", "facegen", "interface", "music", "sound",
+#     "scripts", "maxheights", "vis", "grass", "strings", "shadersfx",
+# })
+
 EXCLUDED_EXTENSIONS = (
     '.esp', '.esm', '.esl',                                  # Plugins (load order)
     '.bsa', '.ba2',                                          # Archives (mounted separately)
@@ -97,17 +103,22 @@ def _find_existing_cache_path(candidates: list[str]) -> str | None:
     return None
 
 
+def _default_excluded_extensions_setting() -> str:
+    return ",".join(EXCLUDED_EXTENSIONS)
+
+
 def _get_excluded_extensions_for_settings(organizer: mobase.IOrganizer, settings_plugin_name: str) -> frozenset[str]:
-    excluded: set[str] = set(EXCLUDED_EXTENSIONS)
     raw = organizer.pluginSetting(settings_plugin_name, "extension_blacklist")
-    if raw and raw.strip():
-        for part in raw.split(","):
-            ext = part.strip().lower()
-            if not ext:
-                continue
-            if not ext.startswith("."):
-                ext = "." + ext
-            excluded.add(ext)
+    if raw is None or not raw.strip():
+        return frozenset(EXCLUDED_EXTENSIONS)
+    excluded: set[str] = set()
+    for part in raw.split(","):
+        ext = part.strip().lower()
+        if not ext:
+            continue
+        if not ext.startswith("."):
+            ext = "." + ext
+        excluded.add(ext)
     return frozenset(excluded)
 
 
@@ -585,9 +596,8 @@ class PreLaunchGameHook(mobase.IPlugin):
             ),
             mobase.PluginSetting(
                 "extension_blacklist",
-                "Additional file extensions to exclude from the cache (comma-separated, e.g. .foo,.bar). "
-                "Built-in list excludes plugins, archives, executables, debug, docs, backup/temp, and logs. Leave empty to use only the built-in list.",
-                ""
+                "File extensions to exclude from the cache (comma-separated). Pre-filled with defaults (plugins, archives, executables, etc.). Remove an extension to include it; add more to exclude.",
+                _default_excluded_extensions_setting()
             ),
             mobase.PluginSetting(
                 "output_to_mod",
