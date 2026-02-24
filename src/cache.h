@@ -8,6 +8,7 @@
 namespace RAPID
 {
 	/// In-memory cache of loose file paths from rapid_vfs_cache.bin.
+	/// Only the path block is read; an optional trailing metadata block (stats, build time) is ignored.
 	/// Load once, query by traversal prefix, release at kDataLoaded.
 	class LooseFileCache
 	{

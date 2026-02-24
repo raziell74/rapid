@@ -42,14 +42,14 @@ The `LocationTraverser` is a "visitor" pattern implementation used to iterate th
 
 ### Summary for CommonLibSSE-NG Users
 
-If you are looking at this via **CommonLibSSE-NG**, you are likely seeing these in **Crash Logs** or trying to **Hook** them:
+RE types, API details, and engine bindings come from [CommonLibSSE-NG](https://github.com/CharmedBaryon/CommonLibSSE-NG). If you are looking at this via **CommonLibSSE-NG**, you are likely seeing these in **Crash Logs** or trying to **Hook** them:
 
 * **In Crash Logs**: A crash in `LooseFileLocation` usually means the engine found a file on disk but failed to open a stream to it (permissions, file corruption, or "Too many open files" limit).
 * **For Plugin Devs**: You can theoretically create your own `Location` (by inheriting from `BSResource::Location`) and inject it into the `FileSystem` via a `LocationTraverser` to provide your own virtual files that don't exist on disk or in a BSA.
 
 ## Build
 
-Requires MSVC, CMake 3.21+, and vcpkg with `VCPKG_ROOT` set. Dependencies are sourced from a custom registry (`Monitor221hz/modding-vcpkg-ports`) for `commonlibsse-ng-fork`.
+Requires MSVC, CMake 3.21+, and vcpkg with `VCPKG_ROOT` set. Dependencies are sourced from a custom registry (`Monitor221hz/modding-vcpkg-ports`) for `commonlibsse-ng-fork` (upstream: [CommonLibSSE-NG](https://github.com/CharmedBaryon/CommonLibSSE-NG)).
 
 ```bash
 # Configure
@@ -85,7 +85,7 @@ The scaffolding that is in place:
 ## Key Conventions
 
 - C++23 (`cxx_std_23`), MSVC only, x64, dynamic CRT linkage
-- `RE::` prefix for Reversed Engine types (CommonLibSSE-NG), `SKSE::` for SKSE interfaces
-- Address Library offsets via `RELOCATION_ID(se_id, ae_id)` for cross-version compatibility
+- `RE::` prefix for Reversed Engine types ([CommonLibSSE-NG](https://github.com/CharmedBaryon/CommonLibSSE-NG)), `SKSE::` for SKSE interfaces
+- Address Library offsets via `RELOCATION_ID(se_id, ae_id)` for cross-version compatibility ([Address Library Database](https://github.com/meh321/AddressLibraryDatabase))
 - New source files must be added to `cmake/sourcelist.cmake`; new headers to `cmake/headerlist.cmake`
 - The custom vcpkg triplet (`x64-windows-skse`) statically links everything except `skse` and `fully-dynamic-game-engine` packages

@@ -6,6 +6,7 @@ import threading
 import time
 import zlib
 from collections import Counter
+from datetime import datetime, timezone
 from typing import List
 
 from mobase.widgets import TaskDialog, TaskDialogButton
@@ -67,6 +68,33 @@ def get_rapid_cache_path(organizer: mobase.IOrganizer, settings_plugin_name: str
                 print(f"RAPID: unknown output mod {value!r}, using Overwrite.")
                 base_dir = organizer.overwritePath()
     return os.path.join(base_dir, CACHE_FILENAME)
+
+
+def _get_cache_path_candidates(organizer: mobase.IOrganizer, settings_plugin_name: str) -> list[str]:
+    candidates: list[str] = []
+    output_path = get_rapid_cache_path(organizer, settings_plugin_name)
+    candidates.append(output_path)
+    overwrite_path = os.path.join(organizer.overwritePath(), CACHE_FILENAME)
+    if overwrite_path not in candidates:
+        candidates.append(overwrite_path)
+    try:
+        game = organizer.managedGame()
+        if game is not None:
+            data_dir = game.dataDirectory()
+            if data_dir is not None:
+                data_path = os.path.join(data_dir.absolutePath(), CACHE_FILENAME)
+                if data_path not in candidates:
+                    candidates.append(data_path)
+    except Exception:
+        pass
+    return candidates
+
+
+def _find_existing_cache_path(candidates: list[str]) -> str | None:
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return None
 
 
 def _get_excluded_extensions_for_settings(organizer: mobase.IOrganizer, settings_plugin_name: str) -> frozenset[str]:
@@ -139,6 +167,84 @@ def _prompt_continue_without_rapid(errors: list[str]) -> bool:
     dialog.addButton(TaskDialogButton("No", QMessageBox.StandardButton.No))
     result = dialog.exec()
     return result == QMessageBox.StandardButton.Yes
+
+
+def _serialize_metadata(
+    build_time_ms: int,
+    ext_counter: Counter[str],
+    root_counter: Counter[str],
+) -> bytes:
+    _pack_u32 = struct.Struct('<I')
+    _pack_u16 = struct.Struct('<H')
+    _pack_u64 = struct.Struct('<Q')
+    parts = [_pack_u64.pack(build_time_ms)]
+    ext_items = ext_counter.most_common()
+    parts.append(_pack_u32.pack(len(ext_items)))
+    for ext, count in ext_items:
+        b = ext.encode("utf-8")
+        parts.append(_pack_u16.pack(len(b)))
+        parts.append(b)
+        parts.append(_pack_u32.pack(count))
+    root_items = root_counter.most_common()
+    parts.append(_pack_u32.pack(len(root_items)))
+    for root, count in root_items:
+        b = root.encode("utf-8")
+        parts.append(_pack_u16.pack(len(b)))
+        parts.append(b)
+        parts.append(_pack_u32.pack(count))
+    return b"".join(parts)
+
+
+def _parse_metadata(
+    raw: bytes, path_block_end: int
+) -> tuple[int, Counter[str], Counter[str]] | None:
+    remaining = len(raw) - path_block_end
+    if remaining < 4:
+        return None
+    meta_len = struct.unpack_from("<I", raw, len(raw) - 4)[0]
+    if meta_len <= 0 or meta_len > remaining - 4:
+        return None
+    max_meta = 1 << 20
+    if meta_len > max_meta:
+        return None
+    start = len(raw) - 4 - meta_len
+    if start < path_block_end:
+        return None
+    meta = raw[start : start + meta_len]
+    off = 0
+    if off + 8 > len(meta):
+        return None
+    (build_time_ms,) = struct.unpack_from("<Q", meta, off)
+    off += 8
+    ext_counter: Counter[str] = Counter()
+    if off + 4 > len(meta):
+        return None
+    (num_ext,) = struct.unpack_from("<I", meta, off)
+    off += 4
+    for _ in range(num_ext):
+        if off + 2 > len(meta):
+            return None
+        (slen,) = struct.unpack_from("<H", meta, off)
+        off += 2
+        if off + slen + 4 > len(meta):
+            return None
+        ext_counter[meta[off : off + slen].decode("utf-8")] = struct.unpack_from("<I", meta, off + slen)[0]
+        off += slen + 4
+    if off + 4 > len(meta):
+        return None
+    (num_root,) = struct.unpack_from("<I", meta, off)
+    off += 4
+    root_counter: Counter[str] = Counter()
+    for _ in range(num_root):
+        if off + 2 > len(meta):
+            return None
+        (slen,) = struct.unpack_from("<H", meta, off)
+        off += 2
+        if off + slen + 4 > len(meta):
+            return None
+        root_counter[meta[off : off + slen].decode("utf-8")] = struct.unpack_from("<I", meta, off + slen)[0]
+        off += slen + 4
+    return (build_time_ms, ext_counter, root_counter)
 
 
 def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bool:
@@ -279,6 +385,18 @@ def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bo
 
         file_paths = [p for batch in all_batches for p in batch]
 
+        ext_counter: Counter[str] = Counter()
+        root_counter: Counter[str] = Counter()
+        for p in file_paths:
+            _, ext = os.path.splitext(p)
+            ext_key = ext.lower() if ext else "(no ext)"
+            ext_counter[ext_key] += 1
+            parts = p.split("\\")
+            root_counter[parts[0] if parts else ""] += 1
+
+        build_time_ms = int(time.time() * 1000)
+        metadata_payload = _serialize_metadata(build_time_ms, ext_counter, root_counter)
+
         _pack_u32 = struct.Struct('<I')
         _pack_u16 = struct.Struct('<H')
         chunks = [_pack_u32.pack(len(file_paths))]
@@ -286,6 +404,8 @@ def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bo
             encoded_path = path.encode('utf-8')
             chunks.append(_pack_u16.pack(len(encoded_path)))
             chunks.append(encoded_path)
+        chunks.append(metadata_payload)
+        chunks.append(_pack_u32.pack(len(metadata_payload)))
         binary_data = b''.join(chunks)
 
         compressed_data = zlib.compress(binary_data, level=1)
@@ -315,8 +435,8 @@ def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bo
 
 def read_cache_stats(
     cache_path: str,
-) -> tuple[list[str], Counter[str], Counter[str], dict[str, list[str]]] | None:
-    """Read and parse rapid_vfs_cache.bin; return (paths, ext_counter, root_counter, samples_per_ext) or None."""
+) -> tuple[list[str], Counter[str], Counter[str], int | None] | None:
+    """Read and parse rapid_vfs_cache.bin; return (paths, ext_counter, root_counter, build_time_utc_ms) or None."""
     if not os.path.isfile(cache_path):
         return None
     try:
@@ -342,29 +462,33 @@ def read_cache_stats(
         offset += path_len
         paths.append(path)
 
-    ext_counter: Counter[str] = Counter()
-    root_counter: Counter[str] = Counter()
-    for p in paths:
-        _, ext = os.path.splitext(p)
-        ext_key = ext.lower() if ext else "(no ext)"
-        ext_counter[ext_key] += 1
-        parts = p.split("\\")
-        root_counter[parts[0] if parts else ""] += 1
+    path_block_end = offset
+    parsed = _parse_metadata(raw, path_block_end)
+    if parsed is not None:
+        build_time_ms, ext_counter, root_counter = parsed
+    else:
+        build_time_ms = None
+        ext_counter = Counter()
+        root_counter = Counter()
+        for p in paths:
+            _, ext = os.path.splitext(p)
+            ext_key = ext.lower() if ext else "(no ext)"
+            ext_counter[ext_key] += 1
+            parts = p.split("\\")
+            root_counter[parts[0] if parts else ""] += 1
 
-    samples_per_ext: dict[str, list[str]] = {}
-    for p in paths:
-        _, ext = os.path.splitext(p)
-        ext_key = ext.lower() if ext else "(no ext)"
-        if ext_key not in samples_per_ext:
-            match_ext = ext if ext else ""
-            samples = [q for q in paths if (os.path.splitext(q)[1].lower() or "") == (match_ext.lower() if match_ext else "")]
-            samples_per_ext[ext_key] = samples[:2]
+    return (paths, ext_counter, root_counter, build_time_ms)
 
-    return (paths, ext_counter, root_counter, samples_per_ext)
+
+def _format_build_time(build_time_utc_ms: int | None) -> str:
+    if build_time_utc_ms is None:
+        return "unknown"
+    dt = datetime.fromtimestamp(build_time_utc_ms / 1000.0, tz=timezone.utc)
+    return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
 class RapidCacheStatsDialog(QDialog):
-    """Dialog showing RAPID cache stats: summary, extensions table, mod roots table, sample paths."""
+    """Dialog showing RAPID cache stats: summary, extensions table, mod roots table."""
 
     def __init__(
         self,
@@ -373,7 +497,7 @@ class RapidCacheStatsDialog(QDialog):
         paths: list[str],
         ext_counter: Counter[str],
         root_counter: Counter[str],
-        samples_per_ext: dict[str, list[str]],
+        build_time_utc_ms: int | None = None,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -381,16 +505,29 @@ class RapidCacheStatsDialog(QDialog):
         self.setMinimumSize(560, 420)
         layout = QVBoxLayout(self)
 
-        # Summary
         summary = QGroupBox("Summary")
         summary_layout = QVBoxLayout()
         summary_layout.addWidget(QLabel(f"Total paths: {len(paths):,}"))
         summary_layout.addWidget(QLabel(f"Cache file size: {file_size:,} bytes"))
+        summary_layout.addWidget(QLabel(f"Built: {_format_build_time(build_time_utc_ms)}"))
         summary_layout.addWidget(QLabel(f"Cache path: {cache_path}"))
         summary.setLayout(summary_layout)
         layout.addWidget(summary)
 
         tabs = QTabWidget()
+
+        # Mod roots table (top 50)
+        root_group = QWidget()
+        root_layout = QVBoxLayout(root_group)
+        root_rows = root_counter.most_common(50)
+        root_table = QTableWidget(len(root_rows), 2)
+        root_table.setHorizontalHeaderLabels(["Mod root", "Count"])
+        root_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        for row, (root, count) in enumerate(root_rows):
+            root_table.setItem(row, 0, QTableWidgetItem(root))
+            root_table.setItem(row, 1, QTableWidgetItem(f"{count:,}"))
+        root_layout.addWidget(root_table)
+        tabs.addTab(root_group, "Mod roots")
 
         # Extensions table
         ext_group = QWidget()
@@ -403,34 +540,6 @@ class RapidCacheStatsDialog(QDialog):
             ext_table.setItem(row, 1, QTableWidgetItem(f"{count:,}"))
         ext_layout.addWidget(ext_table)
         tabs.addTab(ext_group, "Extensions")
-
-        # Mod roots table (top 40)
-        root_group = QWidget()
-        root_layout = QVBoxLayout(root_group)
-        root_rows = root_counter.most_common(40)
-        root_table = QTableWidget(len(root_rows), 2)
-        root_table.setHorizontalHeaderLabels(["Mod root", "Count"])
-        root_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        for row, (root, count) in enumerate(root_rows):
-            root_table.setItem(row, 0, QTableWidgetItem(root))
-            root_table.setItem(row, 1, QTableWidgetItem(f"{count:,}"))
-        root_layout.addWidget(root_table)
-        tabs.addTab(root_group, "Mod roots")
-
-        # Sample paths per extension
-        sample_group = QWidget()
-        sample_layout = QVBoxLayout(sample_group)
-        sorted_exts = sorted(samples_per_ext.keys(), key=lambda e: ext_counter.get(e, 0), reverse=True)
-        sample_table = QTableWidget(len(sorted_exts), 3)
-        sample_table.setHorizontalHeaderLabels(["Extension", "Sample 1", "Sample 2"])
-        sample_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        for row, ext in enumerate(sorted_exts):
-            samples = samples_per_ext.get(ext, [])
-            sample_table.setItem(row, 0, QTableWidgetItem(ext))
-            sample_table.setItem(row, 1, QTableWidgetItem(samples[0] if len(samples) > 0 else ""))
-            sample_table.setItem(row, 2, QTableWidgetItem(samples[1] if len(samples) > 1 else ""))
-        sample_layout.addWidget(sample_table)
-        tabs.addTab(sample_group, "Sample paths")
 
         layout.addWidget(tabs)
         self.setLayout(layout)
@@ -572,7 +681,7 @@ class RapidCacheViewerTool(mobase.IPluginTool):
         return "Raziell74"
 
     def description(self) -> str:
-        return "View decompressed RAPID cache stats (extensions, mod roots, sample paths)."
+        return "View decompressed RAPID cache stats (extensions, mod roots)."
 
     def version(self) -> mobase.VersionInfo:
         return mobase.VersionInfo(1, 0, 0, mobase.ReleaseType.FINAL)
@@ -584,35 +693,46 @@ class RapidCacheViewerTool(mobase.IPluginTool):
         return []
 
     def displayName(self) -> str:
-        return "View RAPID cache"
+        return "RAPID - View Cache Stats"
 
     def tooltip(self) -> str:
-        return "View decompressed RAPID cache stats (extensions, mod roots, sample paths)."
+        return "View decompressed RAPID cache stats (extensions, mod roots)."
 
     def icon(self) -> QIcon:
         return QIcon()
 
     def display(self) -> None:
-        cache_path = get_rapid_cache_path(self._organizer, HOOK_PLUGIN_NAME)
+        parent = self._parentWidget() if hasattr(self, "_parentWidget") else None
+        candidates = _get_cache_path_candidates(self._organizer, HOOK_PLUGIN_NAME)
+        cache_path = _find_existing_cache_path(candidates)
+        if cache_path is None:
+            if not run_index_vfs(self._organizer, HOOK_PLUGIN_NAME):
+                return
+            cache_path = get_rapid_cache_path(self._organizer, HOOK_PLUGIN_NAME)
+            if not os.path.isfile(cache_path):
+                QMessageBox.warning(
+                    parent,
+                    "RAPID cache",
+                    f"The cache file is missing or invalid.\n\nPath: {cache_path}\n\nBuild was cancelled or failed.",
+                )
+                return
         result = read_cache_stats(cache_path)
         if result is None:
-            parent = self._parentWidget() if hasattr(self, "_parentWidget") else None
             QMessageBox.warning(
                 parent,
                 "RAPID cache",
                 f"The cache file is missing or invalid.\n\nPath: {cache_path}\n\nBuild the cache first using \"Build RAPID cache\" or launch the game.",
             )
             return
-        paths, ext_counter, root_counter, samples_per_ext = result
+        paths, ext_counter, root_counter, build_time_utc_ms = result
         file_size = os.path.getsize(cache_path) if os.path.isfile(cache_path) else 0
-        parent = self._parentWidget() if hasattr(self, "_parentWidget") else None
         dialog = RapidCacheStatsDialog(
             cache_path=cache_path,
             file_size=file_size,
             paths=paths,
             ext_counter=ext_counter,
             root_counter=root_counter,
-            samples_per_ext=samples_per_ext,
+            build_time_utc_ms=build_time_utc_ms,
             parent=parent,
         )
         dialog.exec()

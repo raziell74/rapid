@@ -157,7 +157,7 @@ namespace RAPID
 
 			if (cursor != data.size() && Settings::Get().verboseLogging) {
 				SKSE::log::warn(
-					"R.A.P.I.D. cache parse consumed {} of {} bytes (trailing bytes={})",
+					"R.A.P.I.D. cache parse consumed {} of {} bytes (trailing bytes e.g. metadata={})",
 					cursor,
 					data.size(),
 					data.size() - cursor);
