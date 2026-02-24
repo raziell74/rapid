@@ -1,20 +1,13 @@
+#include "cache.h"
 #include "log.h"
 #include "hook.h"
 #include "settings.h"
 
-
-void OnDataLoaded()
-{
-	LogVerbose("RAPID OnDataLoaded: installing traversal hook");
-	RAPID::Hook::Install();
-}
-
 void MessageHandler(SKSE::MessagingInterface::Message* a_msg)
 {
-	LogVerbose("RAPID received SKSE message: {}", static_cast<std::uint32_t>(a_msg->type));
 	switch (a_msg->type) {
 	case SKSE::MessagingInterface::kDataLoaded:
-		OnDataLoaded();
+		RAPID::GetLooseFileCache().Release();
 		break;
 	case SKSE::MessagingInterface::kPostLoad:
 		break;
@@ -34,6 +27,13 @@ SKSEPluginLoad(const SKSE::LoadInterface *skse) {
 	if (!RAPID::Settings::Load()) {
 		SKSE::log::error("RAPID settings failed to load; plugin continuing with defaults");
 	}
+
+	// Allocate memory for the trampoline buffer. 
+    // 14 bytes per hook is generally safe. We're only making 1 hook, so 64 bytes is plenty.
+    SKSE::AllocTrampoline(64);
+
+    // Call your hook installer
+    RAPID::Hooks::LooseFileTraverse::Install();
 
 	auto messaging = SKSE::GetMessagingInterface();
 	if (!messaging->RegisterListener("SKSE", MessageHandler)) {
