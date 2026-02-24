@@ -234,8 +234,8 @@ class PreLaunchGameHook(mobase.IPlugin):
                 print("RAPID cache write canceled by user; launching without RAPID cache.")
                 return True
 
-            game_data_path = self._organizer.gameDirectory().absolutePath()
-            output_path = os.path.join(game_data_path, "Data", "rapid_vfs_cache.bin")
+            game_data_path = self._organizer.managedGame().dataDirectory().absolutePath()
+            output_path = os.path.join(game_data_path, "rapid_vfs_cache.bin")
             with open(output_path, "wb") as f:
                 f.write(compressed_data)
 
