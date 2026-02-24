@@ -77,6 +77,23 @@ if(DEFINED OUTPUT_FOLDER)
             VERBATIM
         )
     endif()
+
+    # When deploying to a mod manager, also deploy the MO2 Python plugin.
+    if(DEFINED ENV{SKYRIM_MODS_FOLDER})
+        set(SRC_MO2_PLUGIN_FOLDER "${CMAKE_SOURCE_DIR}/MO2 Plugin")
+        set(MO2_PLUGINS_FOLDER "$ENV{SKYRIM_MODS_FOLDER}/../plugins")
+        if(EXISTS "${SRC_MO2_PLUGIN_FOLDER}")
+            message(STATUS "MO2 plugin output folder: ${MO2_PLUGINS_FOLDER}")
+            add_custom_command(
+                TARGET "${PROJECT_NAME}"
+                POST_BUILD
+                COMMAND "${CMAKE_COMMAND}" -E make_directory "${MO2_PLUGINS_FOLDER}"
+                COMMAND "${CMAKE_COMMAND}" -E copy_directory "${SRC_MO2_PLUGIN_FOLDER}" "${MO2_PLUGINS_FOLDER}"
+                VERBATIM
+            )
+        endif()
+    endif()
+
     # If you perform a "Debug" build, also copy .pdb file (for debug symbols)
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_custom_command(
