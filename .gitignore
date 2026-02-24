@@ -2,5 +2,8 @@
 .vs
 .vscode/settings.json
 .vscode
+.cursor
+.claude
+CLAUDE.md
 build
 cmake-build*
