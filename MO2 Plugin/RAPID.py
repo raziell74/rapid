@@ -33,6 +33,10 @@ CACHE_SUBDIR = ("SKSE", "Plugins", "RAPID")
 DATA_PREFIX = "data\\"
 RAP2_MAGIC = b"RAP2"
 RAP2_VERSION = 2
+ENGINE_DATA_SUBDIRS = frozenset({
+    "textures", "meshes", "facegen", "interface", "music", "sound",
+    "scripts", "maxheights", "vis", "grass", "strings", "shadersfx",
+})
 HASH_PARITY_VECTORS = (
     "textures/actors/character/face.dds",
     "meshes/armor/iron/ironhelmet.nif",
@@ -41,25 +45,19 @@ HASH_PARITY_VECTORS = (
     "Data\\Textures\\Example.DDS",
 )
 
-# Unused - Need to do more in game logging to determine if there are more directories used by the engine.
-# ENGINE_DATA_SUBDIRS = frozenset({
-#     "textures","meshes", "facegen", "interface", "music", "sound",
-#     "scripts", "maxheights", "vis", "grass", "strings", "shadersfx",
-# })
-
 EXCLUDED_EXTENSIONS = (
     '.esp', '.esm', '.esl',                                  # Plugins (load order)
     '.bsa', '.ba2',                                          # Archives (mounted separately)
-    '.exe', '.dll', '.asi',                                  # Executables / code
+    '.exe'                                                   # Executables
+    '.psc',                                                  # Papyrus source files
     '.skse',                                                 # Plugin metadata
-    '.pdb', '.cdx',                                          # Debug / build
     '.md', '.pdf',                                           # Documentation
     '.bak', '.tmp', '.temp', '.orig',                        # Backup / temp
     '.log',                                                  # Logs
     '.gitignore', '.gitattributes',                          # Version control / IDE
     '.manifest', '.url', '.lnk',                             # Installer / shortcuts
+    '.db',                                                   # Windows cache files
 )
-
 
 def _normalize_path(raw: str) -> str:
     stripped = raw.strip(" \t")
@@ -71,6 +69,13 @@ def _normalize_path(raw: str) -> str:
     if not lowered.startswith(DATA_PREFIX):
         lowered = DATA_PREFIX + lowered
     return lowered
+
+
+def _path_in_allowed_data_root(raw: str) -> bool:
+    parts = raw.replace("/", "\\").lstrip("\\").split("\\", 1)
+    if not parts or not parts[0]:
+        return False
+    return parts[0].lower() in ENGINE_DATA_SUBDIRS
 
 
 def _compute_rapid_hash64(path: str) -> int:
@@ -336,20 +341,15 @@ def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bo
     excluded_extensions = _get_excluded_extensions_for_settings(organizer, settings_plugin_name)
 
     dir_queue = queue.Queue()
-    root_files = []
     for entry in vfs_tree:
-        if entry.isDir():
+        if entry.isDir() and _path_in_allowed_data_root(entry.path('\\')):
             dir_queue.put(entry)
-        else:
-            ext = os.path.splitext(entry.name())[1].lower()
-            if ext not in excluded_extensions:
-                root_files.append(entry.path('\\'))
 
     cpu_count = os.cpu_count() or 4
     configured = max(1, min(int(organizer.pluginSetting(settings_plugin_name, "worker_threads")), cpu_count))
     worker_count = min(dir_queue.qsize(), configured)
 
-    all_batches = [root_files]
+    all_batches = []
     lock = threading.Lock()
     errors = []
     error_lock = threading.Lock()
@@ -379,14 +379,18 @@ def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bo
                 for entry in node:
                     if cancel_event.is_set():
                         break
+                    entry_path = entry.path('\\')
                     if entry.isDir():
-                        dir_queue.put(entry)
-                        with progress_lock:
-                            discovered_dirs += 1
+                        if _path_in_allowed_data_root(entry_path):
+                            dir_queue.put(entry)
+                            with progress_lock:
+                                discovered_dirs += 1
                     else:
+                        if not _path_in_allowed_data_root(entry_path):
+                            continue
                         ext = os.path.splitext(entry.name())[1].lower()
                         if ext not in excluded_extensions:
-                            local_paths.append(entry.path('\\'))
+                            local_paths.append(entry_path)
             except Exception as e:
                 error_message = f"Worker failed while indexing VFS node: {e!r}"
                 print(f"RAPID worker error while indexing VFS: {e!r}")
