@@ -31,11 +31,12 @@ if(DEFINED ENV{SKYRIM_MODS_FOLDER} AND IS_DIRECTORY "$ENV{SKYRIM_MODS_FOLDER}")
 endif()
 
 # Otherwise, you can set OUTPUT_FOLDER to any place you'd like :)
-# set(OUTPUT_FOLDER "C:/path/to/any/folder")
+set(OUTPUT_FOLDER "G:/MO2SSE/mods/RAPID - Resource Asset Path Indexing and Dispatch")
 
 # Setup your SKSE plugin as an SKSE plugin!
 find_package(CommonLibSSE CONFIG REQUIRED)
 find_package(directxtk CONFIG REQUIRED)
+find_package(ZLIB REQUIRED)
 include(cmake/headerlist.cmake)
 include(cmake/sourcelist.cmake)
 add_commonlibsse_plugin(${PROJECT_NAME} SOURCES ${headers} ${sources}) # <--- specifies plugin.cpp
@@ -47,6 +48,12 @@ target_include_directories(
 	"${PROJECT_NAME}"
 	PRIVATE
 		${SIMPLEINI_INCLUDE_DIRS}
+)
+
+target_link_libraries(
+    "${PROJECT_NAME}"
+    PRIVATE
+        ZLIB::ZLIB
 )
 # When your SKSE .dll is compiled, this will automatically copy the .dll into your mods folder.
 # Only works if you configure DEPLOY_ROOT above (or set the SKYRIM_MODS_FOLDER environment variable)
@@ -78,21 +85,20 @@ if(DEFINED OUTPUT_FOLDER)
         )
     endif()
 
-    # When deploying to a mod manager, also deploy the MO2 Python plugin.
-    if(DEFINED ENV{SKYRIM_MODS_FOLDER})
-        set(SRC_MO2_PLUGIN_FOLDER "${CMAKE_SOURCE_DIR}/MO2 Plugin")
-        set(MO2_PLUGINS_FOLDER "$ENV{SKYRIM_MODS_FOLDER}/../plugins")
-        if(EXISTS "${SRC_MO2_PLUGIN_FOLDER}")
-            message(STATUS "MO2 plugin output folder: ${MO2_PLUGINS_FOLDER}")
-            add_custom_command(
-                TARGET "${PROJECT_NAME}"
-                POST_BUILD
-                COMMAND "${CMAKE_COMMAND}" -E make_directory "${MO2_PLUGINS_FOLDER}"
-                COMMAND "${CMAKE_COMMAND}" -E copy_directory "${SRC_MO2_PLUGIN_FOLDER}" "${MO2_PLUGINS_FOLDER}"
-                VERBATIM
-            )
-        endif()
+    # Also deploy the MO2 Python plugin.
+    set(SRC_MO2_PLUGIN_FOLDER "${CMAKE_SOURCE_DIR}/MO2 Plugin")
+    set(MO2_PLUGINS_FOLDER "${OUTPUT_FOLDER}/../../plugins")
+    if(EXISTS "${SRC_MO2_PLUGIN_FOLDER}")
+        message(STATUS "MO2 plugin output folder: ${MO2_PLUGINS_FOLDER}")
+        add_custom_command(
+            TARGET "${PROJECT_NAME}"
+            POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${MO2_PLUGINS_FOLDER}"
+            COMMAND "${CMAKE_COMMAND}" -E copy_directory "${SRC_MO2_PLUGIN_FOLDER}" "${MO2_PLUGINS_FOLDER}"
+            VERBATIM
+        )
     endif()
+
 
     # If you perform a "Debug" build, also copy .pdb file (for debug symbols)
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")

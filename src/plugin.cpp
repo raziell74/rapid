@@ -1,16 +1,18 @@
 #include "log.h"
+#include "hook.h"
+#include "settings.h"
 
 
 void OnDataLoaded()
 {
-   
+	RAPID::Hook::Install();
 }
 
 void MessageHandler(SKSE::MessagingInterface::Message* a_msg)
 {
 	switch (a_msg->type) {
 	case SKSE::MessagingInterface::kDataLoaded:
-        
+		OnDataLoaded();
 		break;
 	case SKSE::MessagingInterface::kPostLoad:
 		break;
@@ -24,15 +26,17 @@ void MessageHandler(SKSE::MessagingInterface::Message* a_msg)
 }
 
 SKSEPluginLoad(const SKSE::LoadInterface *skse) {
-    SKSE::Init(skse);
+	SKSE::Init(skse);
 	SetupLog();
 
+	if (!RAPID::Settings::Load()) {
+		SKSE::log::error("RAPID settings failed to load; plugin continuing with defaults");
+	}
 
-    auto messaging = SKSE::GetMessagingInterface();
+	auto messaging = SKSE::GetMessagingInterface();
 	if (!messaging->RegisterListener("SKSE", MessageHandler)) {
 		return false;
 	}
 
-	
-    return true;
+	return true;
 }

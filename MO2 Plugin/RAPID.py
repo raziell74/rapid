@@ -9,6 +9,23 @@ from mobase.widgets import TaskDialog, TaskDialogButton
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QMessageBox, QProgressDialog
 
+ALLOWED_EXTENSIONS = (
+    '.nif', '.tri', '.egm', '.egt', '.btr', '.bto', '.lod',  # Meshes & Geometry
+    '.dds', '.tga',                                          # Textures
+    '.wav', '.xwm', '.fuz', '.lip',                          # Audio
+    '.hkx', '.btt',                                          # Animations & Behavior
+    '.pex', '.seq',                                          # Scripts & Logic
+    '.swf',                                                  # Interface
+    '.ini', '.json', '.toml', '.xml',                        # Config (Papyrus extenders, HDT, MCM)
+    '.bat',                                                  # Console-callable
+    '.bik',                                                  # Video
+    '.strings', '.dlstrings', '.ilstrings',                  # Localization
+    '.jslot', '.osp',                                        # Presets (RaceMenu, BodySlide)
+    '.ttf', '.otf',                                          # Fonts
+    '.bgsm', '.bgem',                                        # Materials
+    '.osd',                                                  # Object/scene data
+)
+
 class PreLaunchGameHook(mobase.IPlugin):
     def __init__(self):
         super().__init__()
@@ -46,8 +63,29 @@ class PreLaunchGameHook(mobase.IPlugin):
                 f"How many threads to use when scanning your mod files (1–{cpu_count}). "
                 "Higher values are faster up to your CPU's thread count — going beyond that won't help.",
                 min(8, cpu_count)
+            ),
+            mobase.PluginSetting(
+                "extension_whitelist",
+                "Additional file extensions to index (comma-separated, e.g. .foo,.bar). Added to the built-in BSA-style default. Leave empty to use only the default.",
+                ""
             )
         ]
+
+    def _get_allowed_extensions(self) -> tuple[str, ...]:
+        result: list[str] = list(ALLOWED_EXTENSIONS)
+        seen: set[str] = set(ALLOWED_EXTENSIONS)
+        raw = self._organizer.pluginSetting(self.name(), "extension_whitelist")
+        if raw and raw.strip():
+            for part in raw.split(","):
+                ext = part.strip().lower()
+                if not ext:
+                    continue
+                if not ext.startswith("."):
+                    ext = "." + ext
+                if ext not in seen:
+                    seen.add(ext)
+                    result.append(ext)
+        return tuple(result)
 
     def _on_setting_changed(self, plugin_name: str, key: str, old_value, new_value) -> None:
         if plugin_name != self.name() or key != "worker_threads":
@@ -100,6 +138,7 @@ class PreLaunchGameHook(mobase.IPlugin):
 
     def index_vfs(self) -> bool:
         vfs_tree = self._organizer.virtualFileTree()
+        allowed_extensions = self._get_allowed_extensions()
 
         dir_queue = queue.Queue()
         root_files = []
@@ -107,7 +146,8 @@ class PreLaunchGameHook(mobase.IPlugin):
             if entry.isDir():
                 dir_queue.put(entry)
             else:
-                root_files.append(entry.path('\\'))
+                if entry.name().lower().endswith(allowed_extensions):
+                    root_files.append(entry.path('\\'))
 
         cpu_count = os.cpu_count() or 4
         configured = max(1, min(int(self._organizer.pluginSetting(self.name(), "worker_threads")), cpu_count))
@@ -148,7 +188,8 @@ class PreLaunchGameHook(mobase.IPlugin):
                             with progress_lock:
                                 discovered_dirs += 1
                         else:
-                            local_paths.append(entry.path('\\'))
+                            if entry.name().lower().endswith(allowed_extensions):
+                                local_paths.append(entry.path('\\'))
                 except Exception as e:
                     error_message = f"Worker failed while indexing VFS node: {e!r}"
                     print(f"RAPID worker error while indexing VFS: {e!r}")

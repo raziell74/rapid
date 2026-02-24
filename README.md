@@ -48,3 +48,40 @@ _MO2 plugins operate at the application level, not inside the virtual game folde
 2. Extract the downloaded archive. Move the Python script directly into your Mod Organizer 2 plugins folder (e.g., `C:\Modding\MO2\plugins\`).
 3. Restart Mod Organizer 2.
 4. Verify it's installed by clicking the Tools -> Tool Plugins menu at the top of MO2. Ensure the setting to "Run automatically on executable launch" is enabled so it can work its magic in the background.
+
+## MO2 Plugin Settings
+
+The RAPID MO2 plugin can be configured via **Plugins → RAPID - Pre-Launch Game Hook → Settings** (or the equivalent plugin settings entry in your MO2 version). These options control how the virtual file tree is scanned and which files are written into the binary cache.
+
+| Setting | Description |
+|--------|-------------|
+| **Worker threads** | Number of threads used to traverse the virtual file tree (1 up to your CPU core count). Higher values speed up cache generation; the default is the lesser of 8 or your core count. |
+| **Extension whitelist** | *Additional* file extensions to index, comma-separated (e.g. `.foo,.bar`). These are **added to** the built-in BSA-style default; the default list already includes meshes (`.nif`, `.tri`, `.btr`, `.bto`, etc.), textures (`.dds`, `.tga`), audio (`.wav`, `.xwm`, `.fuz`, `.lip`), animations (`.hkx`, `.btt`), scripts (`.pex`, `.seq`), interface (`.swf`), config (`.ini`, `.json`, `.toml`, `.xml`), localization (`.strings`, `.dlstrings`, `.ilstrings`), video (`.bik`), fonts (`.ttf`, `.otf`), materials (`.bgsm`, `.bgem`), and other engine-relevant types. Leave this field **empty** to use only the default. Add extensions here if you use mods that load loose files with custom extensions. |
+
+Only paths whose file extension is in the combined whitelist are written to the cache. This keeps the game's internal hash maps small and avoids indexing non-asset files (e.g. `.txt`, `.psc`, `.esp`, `.dll`).
+
+## SKSE Config
+
+R.A.P.I.D. reads settings from:
+
+- `Data/SKSE/Plugins/RAPID/config.ini`
+
+If the file or directory is missing, the SKSE plugin creates it on startup with defaults.
+
+Default file contents:
+
+```ini
+[General]
+Enabled = true
+VerboseStats = true
+```
+
+## Startup Validation Checklist
+
+Use `%SKSE_LOG_DIR%/RAPID.log` to validate startup behavior:
+
+- Missing cache: confirm fallback message and normal traversal continues.
+- Corrupt cache: confirm decompression/parse error is logged and traversal falls back.
+- Zero-entry cache: confirm warning is logged and traversal falls back.
+- Large cache: confirm decompressed byte count and parsed entry count are logged.
+- Non-ASCII paths: confirm parse completes without crash and counts are reported.

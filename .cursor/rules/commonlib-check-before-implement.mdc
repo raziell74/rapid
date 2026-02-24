@@ -1,0 +1,13 @@
+---
+description: Check CommonLibSSE-NG for existing functionality before writing new Skyrim/SKSE code
+alwaysApply: true
+---
+
+# CommonLib Check Before Implement
+
+- Before implementing **new** Skyrim- or SKSE-specific behavior (path helpers, binary/stream helpers, RE/REL usage, hooks, config under Data/SKSE/Plugins, etc.), **check whether commonlibsse-ng-fork already provides it**.
+- **Where to check:**
+  - API reference: **https://ng.commonlib.dev** (RE, REL, SKSE namespaces).
+  - Source: **CharmedBaryon/CommonLibSSE-NG** on GitHub, `include/RE/`, `include/REL/`, `include/SKSE/`.
+  - This project uses the **commonlibsse-ng-fork** vcpkg port (Monitor221hz/modding-vcpkg-ports); if the port's manifest or overlay adds headers, prefer those symbols when documented.
+- Prefer **RE::** and **REL::** types and helpers over reimplementing engine or address-library abstractions. If the library has no equivalent (e.g. buffer-based LE reads, or Data path resolution), then implement locally and keep the scope minimal.
