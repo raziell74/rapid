@@ -1,5 +1,3 @@
-Here is the rewritten README for R.A.P.I.D., complete with a dash of programmer humor to ease the pain of Skyrim modding:
-
 # R.A.P.I.D. (Resource Asset Path Indexing and Dispatch)
 
 Welcome to **R.A.P.I.D.**, the mod that finally stops the Skyrim Creation Engine from asking Windows "Are we there yet?" 100,000 times before the main menu even loads.
