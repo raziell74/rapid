@@ -20,21 +20,37 @@ inline void SetupLog() {
     spdlog::flush_on(spdlog::level::trace);
 }
 
-inline void LogVerbose(const char* msg,
-	const std::source_location& loc = std::source_location::current())
+inline void LogVerbose(
+	const std::source_location& loc,
+	const char* msg)
 {
 	if (RAPID::Settings::Get().verboseLogging) {
 		SKSE::log::info("{} ({}:{})", msg, loc.file_name(), loc.line());
 	}
 }
 
+inline void LogVerbose(const char* msg)
+{
+	LogVerbose(std::source_location::current(), msg);
+}
+
 template<typename... Args>
-void LogVerbose(fmt::format_string<Args...> fmt, Args&&... args,
-	const std::source_location& loc = std::source_location::current())
+void LogVerbose(
+	const std::source_location& loc,
+	fmt::format_string<Args...> fmt,
+	Args&&... args)
 {
 	if (RAPID::Settings::Get().verboseLogging) {
 		SKSE::log::info("{} ({}:{})", fmt::format(fmt, std::forward<Args>(args)...), loc.file_name(), loc.line());
 	}
+}
+
+template<typename... Args>
+void LogVerbose(
+	fmt::format_string<Args...> fmt,
+	Args&&... args)
+{
+	LogVerbose(std::source_location::current(), fmt, std::forward<Args>(args)...);
 }
 
 inline void LogPerformanceDiagnostics(bool a_isRapidPath, const char* a_mode, std::size_t a_looseFileCount, double a_executionMs)
