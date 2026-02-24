@@ -34,6 +34,13 @@ The scaffolding that is in place:
 - `src/PCH.h` — precompiled header; pulls in `RE/Skyrim.h` and `SKSE/SKSE.h`
 - `src/util.h` — utility namespaces: `PointerUtil`, `SystemUtil::File`, `KeyUtil`, `Util::String`, `MathUtil`, `ObjectUtil`, `FormUtil`, `NifUtil`, `AnimUtil`
 
+## MO2 Python Plugin
+
+- `MO2 Plugin/RAPID.py` — companion MO2 plugin; runs pre-launch, walks `virtualFileTree()` and writes `rapid_vfs_cache.bin` to the active profile folder
+- Uses a work-stealing `queue.Queue` + `threading.Thread` model (up to 8 workers) for parallel VFS traversal
+- Threading relies on pybind11 releasing the GIL during mobase C++ binding calls; workers operate on disjoint tree nodes (no shared mutable state per node)
+- Cache format: zlib-compressed binary — 4-byte LE file count, then per-file: 2-byte LE UTF-8 length + UTF-8 path bytes
+
 ## Key Conventions
 
 - C++23 (`cxx_std_23`), MSVC only, x64, dynamic CRT linkage
