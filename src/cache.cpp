@@ -93,6 +93,12 @@ namespace RAPID
 			       (static_cast<std::uint16_t>(bytes[offset + 1]) << 8);
 		}
 
+		/// ASCII lowercase for path comparison (locale-independent).
+		constexpr char ToLowerAscii(char c)
+		{
+			return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + ('a' - 'A')) : c;
+		}
+
 		void NormalizePathToLower(std::string& path)
 		{
 			std::replace(path.begin(), path.end(), '/', '\\');
@@ -101,6 +107,14 @@ namespace RAPID
 					c = static_cast<char>(c + ('a' - 'A'));
 				}
 			}
+		}
+
+		/// Case-insensitive (ASCII) strict weak ordering for path prefix lookup.
+		bool PathLessIgnoreCase(const std::string& a, const std::string& b)
+		{
+			return std::lexicographical_compare(
+				a.begin(), a.end(), b.begin(), b.end(),
+				[](char x, char y) { return ToLowerAscii(x) < ToLowerAscii(y); });
 		}
 
 		bool ParseCacheEntries(const std::vector<std::uint8_t>& data, std::vector<std::string>& outPaths)
@@ -193,7 +207,7 @@ namespace RAPID
 			return false;
 		}
 
-		std::ranges::sort(_paths);
+		std::ranges::sort(_paths, PathLessIgnoreCase);
 		_loaded = true;
 
 		if (Settings::Get().verboseLogging) {
@@ -214,13 +228,13 @@ namespace RAPID
 			return std::span<const std::string>(_paths);
 		}
 
-		// Range of paths starting with prefix: [lower_bound(prefix), lower_bound(prefixEnd)).
+		// Range of paths starting with prefix (case-insensitive): [lower_bound(prefix), lower_bound(prefixEnd)).
 		// prefixEnd = first string lexicographically after all "prefix*" (e.g. prefix with last char +1).
 		std::string prefixEnd = prefix;
 		prefixEnd.back() = static_cast<char>(static_cast<unsigned char>(prefixEnd.back()) + 1);
 
-		const auto itStart = std::lower_bound(_paths.begin(), _paths.end(), prefix);
-		const auto itEnd = std::lower_bound(itStart, _paths.end(), prefixEnd);
+		const auto itStart = std::lower_bound(_paths.begin(), _paths.end(), prefix, PathLessIgnoreCase);
+		const auto itEnd = std::lower_bound(itStart, _paths.end(), prefixEnd, PathLessIgnoreCase);
 
 		return std::span<const std::string>(itStart, itEnd);
 	}

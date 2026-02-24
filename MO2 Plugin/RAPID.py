@@ -29,13 +29,6 @@ from PyQt6.QtWidgets import (
 HOOK_PLUGIN_NAME = "RAPID - Pre-Launch Game Hook"
 CACHE_FILENAME = "rapid_vfs_cache.bin"
 
-# Data root-level directories the engine actually traverses (from LooseFileLocation logs).
-# Only these subtrees are indexed; other data subdirs are skipped.
-ENGINE_DATA_SUBDIRS = frozenset({
-    "TEXTURES", "MESHES", "FACEGEN", "INTERFACE", "MUSIC", "SOUND",
-    "SCRIPTS", "MAXHEIGHTS", "VIS", "GRASS", "STRINGS", "SHADERSFX",
-})
-
 EXCLUDED_EXTENSIONS = (
     '.esp', '.esm', '.esl',                                  # Plugins (load order)
     '.bsa', '.ba2',                                          # Archives (mounted separately)
@@ -48,25 +41,6 @@ EXCLUDED_EXTENSIONS = (
     '.gitignore', '.gitattributes',                          # Version control / IDE
     '.manifest', '.url', '.lnk',                             # Installer / shortcuts
 )
-
-def _path_under_engine_data(path: str) -> bool:
-    """True if path is under data\\TEXTURES, data\\MESHES, etc. (engine-traversed roots only)."""
-    parts = path.replace("/", "\\").strip("\\").split("\\")
-    parts_upper = [p.upper() for p in parts]
-    try:
-        i = parts_upper.index("DATA")
-    except ValueError:
-        return False
-    if i + 1 >= len(parts):
-        return False
-    return parts_upper[i + 1] in ENGINE_DATA_SUBDIRS
-
-
-def _at_data_folder(path: str) -> bool:
-    """True if path is exactly the 'data' folder (so we only enqueue ENGINE_DATA_SUBDIRS children)."""
-    norm = path.replace("/", "\\").strip("\\").upper()
-    return norm == "DATA" or norm.endswith("\\DATA")
-
 
 def get_rapid_cache_path(organizer: mobase.IOrganizer, settings_plugin_name: str) -> str:
     """Resolve the cache file path from the output_to_mod setting (Overwrite or a mod name)."""
@@ -178,11 +152,9 @@ def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bo
         if entry.isDir():
             dir_queue.put(entry)
         else:
-            path = entry.path("\\")
-            if _path_under_engine_data(path):
-                ext = os.path.splitext(entry.name())[1].lower()
-                if ext not in excluded_extensions:
-                    root_files.append(path)
+            ext = os.path.splitext(entry.name())[1].lower()
+            if ext not in excluded_extensions:
+                root_files.append(entry.path('\\'))
 
     cpu_count = os.cpu_count() or 4
     configured = max(1, min(int(organizer.pluginSetting(settings_plugin_name, "worker_threads")), cpu_count))
@@ -215,27 +187,17 @@ def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bo
                     continue
                 with progress_lock:
                     processed_dirs += 1
-                node_path = node.path("\\")
-                at_data = _at_data_folder(node_path)
-                under_engine_data = _path_under_engine_data(node_path)
                 for entry in node:
                     if cancel_event.is_set():
                         break
                     if entry.isDir():
-                        if at_data:
-                            if entry.name().upper() in ENGINE_DATA_SUBDIRS:
-                                dir_queue.put(entry)
-                                with progress_lock:
-                                    discovered_dirs += 1
-                        else:
-                            dir_queue.put(entry)
-                            with progress_lock:
-                                discovered_dirs += 1
+                        dir_queue.put(entry)
+                        with progress_lock:
+                            discovered_dirs += 1
                     else:
-                        if under_engine_data:
-                            ext = os.path.splitext(entry.name())[1].lower()
-                            if ext not in excluded_extensions:
-                                local_paths.append(entry.path("\\"))
+                        ext = os.path.splitext(entry.name())[1].lower()
+                        if ext not in excluded_extensions:
+                            local_paths.append(entry.path('\\'))
             except Exception as e:
                 error_message = f"Worker failed while indexing VFS node: {e!r}"
                 print(f"RAPID worker error while indexing VFS: {e!r}")
@@ -593,7 +555,7 @@ class RapidCacheTool(mobase.IPluginTool):
 
 
 class RapidCacheViewerTool(mobase.IPluginTool):
-    """Tool that opens a dialog showing RAPID cache stats (View RAPID cache)."""
+    """Tool that opens a dialog showing RAPID cache stats (RAPID - View Cache Stats)."""
 
     def __init__(self):
         super().__init__()
@@ -604,7 +566,7 @@ class RapidCacheViewerTool(mobase.IPluginTool):
         return True
 
     def name(self) -> str:
-        return "RAPID - View Cache Tool"
+        return "RAPID - View Cache Stats"
 
     def author(self) -> str:
         return "Raziell74"
