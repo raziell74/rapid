@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (
 
 HOOK_PLUGIN_NAME = "RAPID - Pre-Launch Game Hook"
 CACHE_FILENAME = "rapid_vfs_cache.bin"
+CACHE_SUBDIR = ("SKSE", "Plugins", "RAPID")
 
 # Unused - Need to do more in game logging to determine if there are more directories used by the engine.
 # ENGINE_DATA_SUBDIRS = frozenset({
@@ -73,14 +74,14 @@ def get_rapid_cache_path(organizer: mobase.IOrganizer, settings_plugin_name: str
             if base_dir is None:
                 print(f"RAPID: unknown output mod {value!r}, using Overwrite.")
                 base_dir = organizer.overwritePath()
-    return os.path.join(base_dir, CACHE_FILENAME)
+    return os.path.join(base_dir, *CACHE_SUBDIR, CACHE_FILENAME)
 
 
 def _get_cache_path_candidates(organizer: mobase.IOrganizer, settings_plugin_name: str) -> list[str]:
     candidates: list[str] = []
     output_path = get_rapid_cache_path(organizer, settings_plugin_name)
     candidates.append(output_path)
-    overwrite_path = os.path.join(organizer.overwritePath(), CACHE_FILENAME)
+    overwrite_path = os.path.join(organizer.overwritePath(), *CACHE_SUBDIR, CACHE_FILENAME)
     if overwrite_path not in candidates:
         candidates.append(overwrite_path)
     try:
@@ -88,7 +89,7 @@ def _get_cache_path_candidates(organizer: mobase.IOrganizer, settings_plugin_nam
         if game is not None:
             data_dir = game.dataDirectory()
             if data_dir is not None:
-                data_path = os.path.join(data_dir.absolutePath(), CACHE_FILENAME)
+                data_path = os.path.join(data_dir.absolutePath(), *CACHE_SUBDIR, CACHE_FILENAME)
                 if data_path not in candidates:
                     candidates.append(data_path)
     except Exception:
@@ -429,9 +430,7 @@ def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bo
 
         output_path = get_rapid_cache_path(organizer, settings_plugin_name)
         output_dir = os.path.dirname(output_path)
-        if not os.path.isdir(output_dir):
-            organizer.setPluginSetting(settings_plugin_name, "output_to_mod", "")
-            output_path = get_rapid_cache_path(organizer, settings_plugin_name)
+        os.makedirs(output_dir, exist_ok=True)
         with open(output_path, "wb") as f:
             f.write(compressed_data)
 
@@ -601,7 +600,8 @@ class PreLaunchGameHook(mobase.IPlugin):
             ),
             mobase.PluginSetting(
                 "output_to_mod",
-                "Where to write the cache file. Leave empty or type 'Overwrite' for MO2's Overwrite folder (default). "
+                "Where to write the cache file (always under SKSE/Plugins/RAPID in that folder). "
+                "Leave empty or type 'Overwrite' for MO2's Overwrite folder (default). "
                 "To write into a specific mod, type the exact mod name as shown in the left pane.",
                 ""
             )

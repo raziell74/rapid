@@ -17,12 +17,13 @@ namespace RAPID
 	{
 		std::filesystem::path GetCachePath()
 		{
-			return Settings::GetGameDataDirectory() / "rapid_vfs_cache.bin";
+			return Settings::GetConfigDirectory() / "rapid_vfs_cache.bin";
 		}
 
 		bool ReadCompressedCache(std::vector<std::uint8_t>& outBuffer)
 		{
 			const auto cachePath = GetCachePath();
+			SKSE::log::info("R.A.P.I.D. cache lookup path: {}", cachePath.string());
 			std::ifstream file(cachePath, std::ios::binary | std::ios::ate);
 			if (!file.is_open()) {
 				SKSE::log::warn("R.A.P.I.D. cache file not found at {}", cachePath.string());
@@ -210,8 +211,12 @@ namespace RAPID
 		std::ranges::sort(_paths, PathLessIgnoreCase);
 		_loaded = true;
 
-		if (Settings::Get().verboseLogging) {
-			SKSE::log::info("R.A.P.I.D. cache loaded: {} paths in memory", _paths.size());
+		SKSE::log::info("R.A.P.I.D. cache loaded from {}: {} paths", GetCachePath().string(), _paths.size());
+		if (Settings::Get().verboseLogging && !_paths.empty()) {
+			const std::size_t sampleCount = (std::min)(static_cast<std::size_t>(5), _paths.size());
+			for (std::size_t i = 0; i < sampleCount; ++i) {
+				SKSE::log::info("R.A.P.I.D. cache path sample [{}]: \"{}\"", i, _paths[i]);
+			}
 		}
 		return true;
 	}
@@ -228,13 +233,24 @@ namespace RAPID
 			return std::span<const std::string>(_paths);
 		}
 
-		// Range of paths starting with prefix (case-insensitive): [lower_bound(prefix), lower_bound(prefixEnd)).
-		// prefixEnd = first string lexicographically after all "prefix*" (e.g. prefix with last char +1).
 		std::string prefixEnd = prefix;
 		prefixEnd.back() = static_cast<char>(static_cast<unsigned char>(prefixEnd.back()) + 1);
 
 		const auto itStart = std::lower_bound(_paths.begin(), _paths.end(), prefix, PathLessIgnoreCase);
 		const auto itEnd = std::lower_bound(itStart, _paths.end(), prefixEnd, PathLessIgnoreCase);
+		const std::size_t matchCount = static_cast<std::size_t>(itEnd - itStart);
+
+		if (matchCount == 0) {
+			static bool loggedPrefixMismatch = false;
+			if (Settings::Get().verboseLogging && !loggedPrefixMismatch) {
+				loggedPrefixMismatch = true;
+				SKSE::log::info(
+					"R.A.P.I.D. GetPathsForPrefix normalized prefix \"{}\" matched 0 paths (cache size {}; first cache path: \"{}\")",
+					prefix,
+					_paths.size(),
+					_paths.front());
+			}
+		}
 
 		return std::span<const std::string>(itStart, itEnd);
 	}

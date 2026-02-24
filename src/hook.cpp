@@ -38,9 +38,10 @@ namespace RAPID::Hooks
 		const std::span<const std::string> paths = cache.GetPathsForPrefix(a_path);
 
 		if (paths.empty()) {
-			if (verbose) {
-				SKSE::log::info("R.A.P.I.D. no paths in cache for prefix \"{}\"; falling back to vanilla traversal", currentPath);
-			}
+			SKSE::log::info(
+				"R.A.P.I.D. no paths in cache for prefix \"{}\" (raw a_path \"{}\"); falling back to vanilla traversal",
+				currentPath,
+				a_path ? a_path : "(null)");
 			return false;
 		}
 
