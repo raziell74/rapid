@@ -107,16 +107,6 @@ def main():
     print("\n--- Mod roots (top 40) ---")
     for root, count in root_counter.most_common(40):
         print(f"  {root!r}: {count}")
-    print("\n--- Sample paths per extension (first 2) ---")
-    seen_ext = set()
-    for p in paths:
-        _, ext = os.path.splitext(p)
-        ext = ext.lower() if ext else "(no ext)"
-        if ext not in seen_ext:
-            seen_ext.add(ext)
-            samples = [q for q in paths if os.path.splitext(q)[1].lower() == (ext if ext != "(no ext)" else "")]
-            for s in samples[:2]:
-                print(f"  {ext!r}: {s!r}")
     return 0
 
 if __name__ == "__main__":

@@ -1,36 +1,42 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace RAPID
 {
-	/// In-memory cache of loose file paths from rapid_vfs_cache.bin.
-	/// Only the path block is read; an optional trailing metadata block (stats, build time) is ignored.
-	/// Load once, query by traversal prefix, release at kDataLoaded.
+	enum class CacheFormat : std::uint32_t
+	{
+		kUnknown = 0,
+		kRap2 = 2
+	};
+
+	struct ResolveResult
+	{
+		const std::string* path{ nullptr };
+		std::size_t collisionCandidates{ 0 };
+	};
+
 	class LooseFileCache
 	{
 	public:
-		/// Load and parse the cache from disk (idempotent after first success).
-		/// Paths are normalized (backslash, lowercase) and sorted for prefix lookup.
-		/// @return true if loaded (or already loaded), false on error
 		bool Load();
-
-		/// Return paths that start with the given traversal prefix (e.g. "data\\TEXTURES\\").
-		/// Prefix is normalized (backslash, lowercase); empty or "ROOT" returns all paths.
-		/// Span is valid until the next non-const call (Release or Load).
 		std::span<const std::string> GetPathsForPrefix(const char* traversalPath);
-
-		/// Clear in-memory cache; called at kDataLoaded. Load() may be called again after.
+		ResolveResult ResolvePath(const char* path) const;
+		std::size_t GetEntryCount() const;
+		CacheFormat GetFormat() const;
 		void Release();
 
 	private:
 		std::vector<std::string> _paths;
+		std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> _hashToPathIndexes;
 		bool _loaded{ false };
+		CacheFormat _format{ CacheFormat::kUnknown };
 	};
 
-	/// Singleton cache instance used by the hook and plugin.
 	LooseFileCache& GetLooseFileCache();
 }

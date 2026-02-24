@@ -1,4 +1,5 @@
 #include "cache.h"
+#include "bsa_hash.h"
 #include "log.h"
 #include "settings.h"
 
@@ -15,6 +16,8 @@ namespace RAPID
 {
 	namespace
 	{
+		constexpr std::uint32_t kRap2Version = 2;
+
 		std::filesystem::path GetCachePath()
 		{
 			return Settings::GetConfigDirectory() / "rapid_vfs_cache.bin";
@@ -94,92 +97,84 @@ namespace RAPID
 			       (static_cast<std::uint16_t>(bytes[offset + 1]) << 8);
 		}
 
-		/// ASCII lowercase for path comparison (locale-independent).
-		constexpr char ToLowerAscii(char c)
+		bool ParseRap2(const std::vector<std::uint8_t>& data, std::vector<std::string>& outPaths)
 		{
-			return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + ('a' - 'A')) : c;
-		}
-
-		void NormalizePathToLower(std::string& path)
-		{
-			std::replace(path.begin(), path.end(), '/', '\\');
-			for (auto& c : path) {
-				if (c >= 'A' && c <= 'Z') {
-					c = static_cast<char>(c + ('a' - 'A'));
-				}
-			}
-		}
-
-		/// Case-insensitive (ASCII) strict weak ordering for path prefix lookup.
-		bool PathLessIgnoreCase(const std::string& a, const std::string& b)
-		{
-			return std::lexicographical_compare(
-				a.begin(), a.end(), b.begin(), b.end(),
-				[](char x, char y) { return ToLowerAscii(x) < ToLowerAscii(y); });
-		}
-
-		bool ParseCacheEntries(const std::vector<std::uint8_t>& data, std::vector<std::string>& outPaths)
-		{
-			if (data.size() < sizeof(std::uint32_t)) {
-				SKSE::log::error("R.A.P.I.D. cache payload too small for header");
+			if (data.size() < 12) {
+				SKSE::log::error("R.A.P.I.D. RAP2 cache payload too small for header");
 				return false;
 			}
 
-			const std::uint32_t expectedCount = ReadU32LE(data, 0);
-			std::size_t cursor = sizeof(std::uint32_t);
+			if (!(data[0] == 'R' && data[1] == 'A' && data[2] == 'P' && data[3] == '2')) {
+				SKSE::log::error("R.A.P.I.D. RAP2 cache invalid magic");
+				return false;
+			}
+
+			const std::uint32_t version = ReadU32LE(data, 4);
+			if (version != kRap2Version) {
+				SKSE::log::error(
+					"R.A.P.I.D. RAP2 cache version mismatch (expected {}, got {})",
+					kRap2Version,
+					version);
+				return false;
+			}
+
+			const std::uint32_t expectedCount = ReadU32LE(data, 8);
+			std::size_t cursor = 12;
 
 			outPaths.clear();
 			outPaths.reserve(expectedCount);
 
 			for (std::uint32_t i = 0; i < expectedCount; ++i) {
-				if (cursor + sizeof(std::uint16_t) > data.size()) {
-					SKSE::log::error("R.A.P.I.D. cache truncated reading length at index {}", i);
+				if (cursor + sizeof(std::uint64_t) + sizeof(std::uint16_t) > data.size()) {
+					SKSE::log::error("R.A.P.I.D. RAP2 cache truncated reading record header at index {}", i);
 					return false;
 				}
+
+				cursor += sizeof(std::uint64_t);
 
 				const std::uint16_t pathLength = ReadU16LE(data, cursor);
 				cursor += sizeof(std::uint16_t);
 
 				if (cursor + pathLength > data.size()) {
-					SKSE::log::error("R.A.P.I.D. cache truncated reading path bytes at index {}", i);
+					SKSE::log::error("R.A.P.I.D. RAP2 cache truncated reading path bytes at index {}", i);
 					return false;
 				}
 
 				std::string path(reinterpret_cast<const char*>(data.data() + cursor), pathLength);
 				cursor += pathLength;
-
-				if (path.empty()) {
-					continue;
+				if (!path.empty()) {
+					outPaths.push_back(std::move(path));
 				}
-
-				NormalizePathToLower(path);
-				outPaths.push_back(std::move(path));
 			}
 
-			if (cursor != data.size() && Settings::Get().verboseLogging) {
-				SKSE::log::warn(
-					"R.A.P.I.D. cache parse consumed {} of {} bytes (trailing bytes e.g. metadata={})",
-					cursor,
-					data.size(),
-					data.size() - cursor);
+			if (cursor < data.size()) {
+				if (data.size() - cursor < sizeof(std::uint32_t)) {
+					SKSE::log::error("R.A.P.I.D. RAP2 metadata trailer is truncated");
+					return false;
+				}
+				const std::uint32_t metadataLen = ReadU32LE(data, data.size() - sizeof(std::uint32_t));
+				if (metadataLen > data.size() - cursor - sizeof(std::uint32_t) && Settings::Get().verboseLogging) {
+					SKSE::log::warn(
+						"R.A.P.I.D. RAP2 metadata length appears invalid (len={}, trailing={})",
+						metadataLen,
+						data.size() - cursor - sizeof(std::uint32_t));
+				}
 			}
+
 			return true;
 		}
 
-		std::string NormalizeTraversalPrefix(const char* traversalPath)
+		bool ParseCacheEntries(
+			const std::vector<std::uint8_t>& data,
+			std::vector<std::string>& outPaths,
+			CacheFormat& outFormat)
 		{
-			if (!traversalPath || traversalPath[0] == '\0') {
-				return "";
+			outFormat = CacheFormat::kUnknown;
+			if (!ParseRap2(data, outPaths)) {
+				return false;
 			}
-			std::string s(traversalPath);
-			NormalizePathToLower(s);
-			if (s == "root") {
-				return "";
-			}
-			if (!s.empty() && s.back() != '\\') {
-				s += '\\';
-			}
-			return s;
+			outFormat = CacheFormat::kRap2;
+			return true;
 		}
 	}
 
@@ -199,7 +194,7 @@ namespace RAPID
 			return false;
 		}
 
-		if (!ParseCacheEntries(uncompressed, _paths)) {
+		if (!ParseCacheEntries(uncompressed, _paths, _format)) {
 			return false;
 		}
 
@@ -208,16 +203,22 @@ namespace RAPID
 			return false;
 		}
 
-		std::ranges::sort(_paths, PathLessIgnoreCase);
+		std::ranges::sort(_paths);
+
+		_hashToPathIndexes.clear();
+		_hashToPathIndexes.reserve(_paths.size());
+		for (std::uint32_t i = 0; i < _paths.size(); ++i) {
+			const std::uint64_t hash = ComputeRapidHash64(_paths[i]);
+			_hashToPathIndexes[hash].push_back(i);
+		}
 		_loaded = true;
 
-		SKSE::log::info("R.A.P.I.D. cache loaded from {}: {} paths", GetCachePath().string(), _paths.size());
-		if (Settings::Get().verboseLogging && !_paths.empty()) {
-			const std::size_t sampleCount = (std::min)(static_cast<std::size_t>(5), _paths.size());
-			for (std::size_t i = 0; i < sampleCount; ++i) {
-				SKSE::log::info("R.A.P.I.D. cache path sample [{}]: \"{}\"", i, _paths[i]);
-			}
-		}
+		SKSE::log::info(
+			"R.A.P.I.D. cache loaded from {}: {} paths (format={}, inflated={} bytes)",
+			GetCachePath().string(),
+			_paths.size(),
+			static_cast<std::uint32_t>(_format),
+			uncompressed.size());
 		return true;
 	}
 
@@ -236,8 +237,8 @@ namespace RAPID
 		std::string prefixEnd = prefix;
 		prefixEnd.back() = static_cast<char>(static_cast<unsigned char>(prefixEnd.back()) + 1);
 
-		const auto itStart = std::lower_bound(_paths.begin(), _paths.end(), prefix, PathLessIgnoreCase);
-		const auto itEnd = std::lower_bound(itStart, _paths.end(), prefixEnd, PathLessIgnoreCase);
+		const auto itStart = std::lower_bound(_paths.begin(), _paths.end(), prefix);
+		const auto itEnd = std::lower_bound(itStart, _paths.end(), prefixEnd);
 		const std::size_t matchCount = static_cast<std::size_t>(itEnd - itStart);
 
 		if (matchCount == 0) {
@@ -255,11 +256,51 @@ namespace RAPID
 		return std::span<const std::string>(itStart, itEnd);
 	}
 
+	ResolveResult LooseFileCache::ResolvePath(const char* path) const
+	{
+		ResolveResult result{};
+		if (!_loaded || _paths.empty() || !path) {
+			return result;
+		}
+
+		const std::string normalized = NormalizePath(path);
+		if (normalized.empty()) {
+			return result;
+		}
+
+		const std::uint64_t hash = ComputeRapidHash64(normalized);
+		const auto it = _hashToPathIndexes.find(hash);
+		if (it == _hashToPathIndexes.end()) {
+			return result;
+		}
+
+		result.collisionCandidates = it->second.size();
+		for (const std::uint32_t index : it->second) {
+			if (index < _paths.size() && _paths[index] == normalized) {
+				result.path = &_paths[index];
+				return result;
+			}
+		}
+		return result;
+	}
+
+	std::size_t LooseFileCache::GetEntryCount() const
+	{
+		return _paths.size();
+	}
+
+	CacheFormat LooseFileCache::GetFormat() const
+	{
+		return _format;
+	}
+
 	void LooseFileCache::Release()
 	{
 		_paths.clear();
 		_paths.shrink_to_fit();
+		_hashToPathIndexes.clear();
 		_loaded = false;
+		_format = CacheFormat::kUnknown;
 		if (Settings::Get().verboseLogging) {
 			SKSE::log::info("R.A.P.I.D. cache released");
 		}

@@ -73,8 +73,23 @@ Default file contents:
 ```ini
 [General]
 Enabled = true
-VerboseStats = true
+VerboseLogging = true
+PerformanceDiagnostics = false
 ```
+
+## Cache Format (RAP2)
+
+`rapid_vfs_cache.bin` is zlib-compressed. After decompression, the current layout is:
+
+- `magic[4]`: `RAP2`
+- `version_u32`: `2`
+- `record_count_u32`
+- repeated records:
+  - `path_hash_u64_le`
+  - `path_len_u16_le`
+  - `path_utf8[path_len]` (canonical lowercase `\\` path, optional leading `data\\` stripped)
+- metadata blob (for MO2 cache stats)
+- `metadata_len_u32_le`
 
 ## Startup Validation Checklist
 

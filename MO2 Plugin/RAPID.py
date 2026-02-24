@@ -30,6 +30,16 @@ from PyQt6.QtWidgets import (
 HOOK_PLUGIN_NAME = "RAPID - Pre-Launch Game Hook"
 CACHE_FILENAME = "rapid_vfs_cache.bin"
 CACHE_SUBDIR = ("SKSE", "Plugins", "RAPID")
+DATA_PREFIX = "data\\"
+RAP2_MAGIC = b"RAP2"
+RAP2_VERSION = 2
+HASH_PARITY_VECTORS = (
+    "textures/actors/character/face.dds",
+    "meshes/armor/iron/ironhelmet.nif",
+    "sound/voice/skyrim.esm/guard/hello.wav",
+    "scripts/test.pex",
+    "Data\\Textures\\Example.DDS",
+)
 
 # Unused - Need to do more in game logging to determine if there are more directories used by the engine.
 # ENGINE_DATA_SUBDIRS = frozenset({
@@ -49,6 +59,66 @@ EXCLUDED_EXTENSIONS = (
     '.gitignore', '.gitattributes',                          # Version control / IDE
     '.manifest', '.url', '.lnk',                             # Installer / shortcuts
 )
+
+
+def _normalize_path(raw: str) -> str:
+    stripped = raw.strip(" \t")
+    lowered = stripped.replace("/", "\\").lower()
+    while "\\\\" in lowered:
+        lowered = lowered.replace("\\\\", "\\")
+    lowered = lowered.lstrip("\\")
+    lowered = lowered.rstrip("\\")
+    if not lowered.startswith(DATA_PREFIX):
+        lowered = DATA_PREFIX + lowered
+    return lowered
+
+
+def _compute_rapid_hash64(path: str) -> int:
+    normalized = _normalize_path(path)
+    dot = normalized.rfind(".")
+    if dot == -1:
+        root = normalized
+        ext = ""
+    else:
+        root = normalized[:dot]
+        ext = normalized[dot:]
+
+    low = 0
+    if root:
+        low = ord(root[-1]) & 0xFF
+        if len(root) > 2:
+            low |= (ord(root[-2]) & 0xFF) << 8
+        low |= (len(root) & 0xFFFFFFFF) << 16
+        low |= (ord(root[0]) & 0xFF) << 24
+        low &= 0xFFFFFFFF
+
+    if ext == ".kf":
+        low |= 0x80
+    elif ext == ".nif":
+        low |= 0x8000
+    elif ext == ".dds":
+        low |= 0x8080
+    elif ext == ".wav":
+        low |= 0x80000000
+    low &= 0xFFFFFFFF
+
+    mid_hash = 0
+    for char in root[1:-2]:
+        mid_hash = ((mid_hash * 0x1003F) + ord(char)) & 0xFFFFFFFF
+
+    ext_hash = 0
+    for char in ext:
+        ext_hash = ((ext_hash * 0x1003F) + ord(char)) & 0xFFFFFFFF
+
+    high = (mid_hash + ext_hash) & 0xFFFFFFFF
+    return ((high << 32) | low) & 0xFFFFFFFFFFFFFFFF
+
+
+def _emit_hash_parity_vectors() -> None:
+    for sample in HASH_PARITY_VECTORS:
+        normalized = _normalize_path(sample)
+        value = _compute_rapid_hash64(sample)
+        print(f"RAPID hash vector path={sample!r} normalized={normalized!r} hash=0x{value:016X}")
 
 def get_rapid_cache_path(organizer: mobase.IOrganizer, settings_plugin_name: str) -> str:
     """Resolve the cache file path from the output_to_mod setting (Overwrite or a mod name)."""
@@ -261,6 +331,7 @@ def _parse_metadata(
 
 def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bool:
     """Run VFS indexing and write rapid_vfs_cache.bin to the configured output (Overwrite or named mod)."""
+    _emit_hash_parity_vectors()
     vfs_tree = organizer.virtualFileTree()
     excluded_extensions = _get_excluded_extensions_for_settings(organizer, settings_plugin_name)
 
@@ -395,11 +466,13 @@ def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bo
                 print(f"RAPID failed to display error prompt: {e!r}")
                 return True
 
-        file_paths = [p for batch in all_batches for p in batch]
+        file_paths = [_normalize_path(p) for batch in all_batches for p in batch]
+        file_paths = [p for p in file_paths if p]
+        serializable_paths = [p for p in file_paths if len(p.encode("utf-8")) <= 0xFFFF]
 
         ext_counter: Counter[str] = Counter()
         root_counter: Counter[str] = Counter()
-        for p in file_paths:
+        for p in serializable_paths:
             _, ext = os.path.splitext(p)
             ext_key = ext.lower() if ext else "(no ext)"
             ext_counter[ext_key] += 1
@@ -411,9 +484,12 @@ def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bo
 
         _pack_u32 = struct.Struct('<I')
         _pack_u16 = struct.Struct('<H')
-        chunks = [_pack_u32.pack(len(file_paths))]
-        for path in file_paths:
+        _pack_u64 = struct.Struct('<Q')
+        chunks = [RAP2_MAGIC, _pack_u32.pack(RAP2_VERSION), _pack_u32.pack(len(serializable_paths))]
+        for path in serializable_paths:
             encoded_path = path.encode('utf-8')
+            path_hash = _compute_rapid_hash64(path)
+            chunks.append(_pack_u64.pack(path_hash))
             chunks.append(_pack_u16.pack(len(encoded_path)))
             chunks.append(encoded_path)
         chunks.append(metadata_payload)
@@ -437,7 +513,7 @@ def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bo
         _update_progress_dialog(
             progress_dialog, "RAPID cache complete.", 1, 1, indeterminate=False
         )
-        print(f"RAPID Cache built successfully! Indexed {len(file_paths)} loose files.")
+        print(f"RAPID Cache built successfully! Indexed {len(serializable_paths)} loose files.")
         return True
     finally:
         progress_dialog.close()
@@ -458,17 +534,27 @@ def read_cache_stats(
     offset = 0
     if len(raw) < 4:
         return None
-    (num_files,) = struct.unpack_from("<I", raw, offset)
-    offset += 4
+
+    if len(raw) < 12 or raw[:4] != RAP2_MAGIC:
+        return None
+    version = struct.unpack_from("<I", raw, 4)[0]
+    if version != RAP2_VERSION:
+        return None
+    (num_files,) = struct.unpack_from("<I", raw, 8)
+    offset = 12
+
     paths: list[str] = []
     for _ in range(num_files):
+        if offset + 8 > len(raw):
+            return None
+        offset += 8
         if offset + 2 > len(raw):
             return None
         (path_len,) = struct.unpack_from("<H", raw, offset)
         offset += 2
         if offset + path_len > len(raw):
             return None
-        path = raw[offset : offset + path_len].decode("utf-8")
+        path = _normalize_path(raw[offset : offset + path_len].decode("utf-8"))
         offset += path_len
         paths.append(path)
 

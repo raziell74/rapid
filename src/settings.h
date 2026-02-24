@@ -9,7 +9,7 @@ namespace RAPID::Settings
 	struct Config
 	{
 		bool enabled{ true };
-		bool verboseLogging{ true };
+		bool verboseLogging{ false };
 		bool performanceDiagnostics{ false };
 	};
 
@@ -49,7 +49,7 @@ namespace RAPID::Settings
 		CSimpleIniA ini;
 		ini.SetUnicode();
 		ini.SetBoolValue("General", "Enabled", true);
-		ini.SetBoolValue("General", "VerboseLogging", true);
+		ini.SetBoolValue("General", "VerboseLogging", false);
 		ini.SetBoolValue("General", "PerformanceDiagnostics", false);
 		const auto rc = ini.SaveFile(iniPath.string().c_str());
 		if (rc < 0) {
@@ -83,7 +83,7 @@ namespace RAPID::Settings
 
 		auto& config = Get();
 		config.enabled = ini.GetBoolValue("General", "Enabled", true);
-		config.verboseLogging = ini.GetBoolValue("General", "VerboseLogging", true);
+		config.verboseLogging = ini.GetBoolValue("General", "VerboseLogging", false);
 		config.performanceDiagnostics = ini.GetBoolValue("General", "PerformanceDiagnostics", false);
 
 		SKSE::log::info(

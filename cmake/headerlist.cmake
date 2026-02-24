@@ -5,4 +5,6 @@ set(headers ${headers}
     src/hook.h 
     src/settings.h
     src/cache.h
+    src/location.h
+    src/bsa_hash.h
 )

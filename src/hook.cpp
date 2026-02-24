@@ -1,6 +1,8 @@
 #include "cache.h"
+#include "bsa_hash.h"
 #include "hook.h"
 #include "log.h"
+#include "location.h"
 #include "settings.h"
 
 #include <chrono>
@@ -32,10 +34,22 @@ namespace RAPID::Hooks
 			return false;
 		}
 
+		auto& rapidLocation = RAPID::GetRapidLocation();
+		rapidLocation.BindLooseLocation(a_this);
+
 		const bool perfDiag = RAPID::Settings::Get().performanceDiagnostics;
 		const auto t0 = perfDiag ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
 
 		const std::span<const std::string> paths = cache.GetPathsForPrefix(a_path);
+		if (verbose) {
+			const std::string normalizedPrefix = NormalizeTraversalPrefix(a_path);
+			SKSE::log::info(
+				"R.A.P.I.D. traversal prefix raw=\"{}\" normalized=\"{}\" cacheEntries={} matchCount={}",
+				a_path ? a_path : "(null)",
+				normalizedPrefix,
+				cache.GetEntryCount(),
+				paths.size());
+		}
 
 		if (paths.empty()) {
 			SKSE::log::info(
@@ -46,7 +60,7 @@ namespace RAPID::Hooks
 		}
 
 		for (const auto& path : paths) {
-			a_traverser.ProcessName(path.c_str(), *a_this);
+			a_traverser.ProcessName(path.c_str(), rapidLocation);
 		}
 
 		if (verbose) {

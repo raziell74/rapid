@@ -1,6 +1,7 @@
 #include "cache.h"
 #include "log.h"
 #include "hook.h"
+#include "location.h"
 #include "settings.h"
 
 void MessageHandler(SKSE::MessagingInterface::Message* a_msg)
@@ -27,6 +28,20 @@ SKSEPluginLoad(const SKSE::LoadInterface *skse) {
 	if (!RAPID::Settings::Load()) {
 		SKSE::log::error("RAPID settings failed to load; plugin continuing with defaults");
 	}
+
+	auto& cache = RAPID::GetLooseFileCache();
+	const bool cacheLoaded = cache.Load();
+	SKSE::log::info(
+		"R.A.P.I.D. cache load {} entries={} format={}",
+		cacheLoaded ? "ok" : "failed",
+		cache.GetEntryCount(),
+		static_cast<std::uint32_t>(cache.GetFormat()));
+
+	auto& rapidLocation = RAPID::GetRapidLocation();
+	const bool locationRegistered = rapidLocation.Register();
+	SKSE::log::info(
+		"R.A.P.I.D. location registration {}",
+		locationRegistered ? "ok" : "failed");
 
 	// Allocate memory for the trampoline buffer. 
     // 14 bytes per hook is generally safe. We're only making 1 hook, so 64 bytes is plenty.
