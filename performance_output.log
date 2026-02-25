@@ -1,0 +1,22 @@
+-- Without RAPID --
+
+[2026-02-25 13:17:46.692] [log] [info] [settings.h:89] Settings loaded from G:\Steam\steamapps\common\Skyrim Special Edition\Data\SKSE\Plugins\RAPID\config.ini (enabled=false, verboseLogging=true, performanceDiagnostics=true)
+[2026-02-25 13:17:46.692] [log] [info] [location.cpp:113] R.A.P.I.D. custom location registered (hook-backed)
+[2026-02-25 13:17:46.692] [log] [info] [plugin.cpp:35] R.A.P.I.D. location registration ok
+[2026-02-25 13:17:46.692] [log] [debug] [Trampoline.cpp:225] Default Trampoline => 0B / 64B (00.00%)
+[2026-02-25 13:17:46.693] [log] [info] [hook.h:59] LooseFileLocation native metrics hooks installed successfully
+[2026-02-25 13:23:30.002] [log] [info] [hook.cpp:65] R.A.P.I.D. performance diagnostics: native traversal events=27, discovered=879495, loaded=1075620 (sync=1075620, async=0), totalTraversalTimeMs=173977.970 ms
+[2026-02-25 13:23:30.002] [log] [info] [cache.cpp:276] R.A.P.I.D. cache released
+
+-- With RAPID --
+
+[2026-02-25 12:34:15.501] [log] [info] [settings.h:89] Settings loaded from G:\Steam\steamapps\common\Skyrim Special Edition\Data\SKSE\Plugins\RAPID\config.ini (enabled=true, verboseLogging=true, performanceDiagnostics=true)
+[2026-02-25 12:34:15.501] [log] [info] [location.cpp:113] R.A.P.I.D. custom location registered (hook-backed)
+[2026-02-25 12:34:15.502] [log] [info] [plugin.cpp:35] R.A.P.I.D. location registration ok
+[2026-02-25 12:34:15.502] [log] [debug] [Trampoline.cpp:225] Default Trampoline => 0B / 64B (00.00%)
+[2026-02-25 12:34:15.502] [log] [info] [hook.h:40] LooseFileLocation::DoTraversePrefix VTable Hook installed successfully!
+[2026-02-25 12:34:25.243] [log] [info] [hook.cpp:87] R.A.P.I.D. first traversal intercepted at "data\TEXTURES\"
+[2026-02-25 12:34:25.243] [log] [info] [cache.cpp:28] R.A.P.I.D. cache lookup path: G:\Steam\steamapps\common\Skyrim Special Edition\Data\SKSE\Plugins\RAPID\rapid_vfs_cache.bin
+[2026-02-25 12:34:31.044] [log] [info] [cache.cpp:213] R.A.P.I.D. cache loaded from G:\Steam\steamapps\common\Skyrim Special Edition\Data\SKSE\Plugins\RAPID\rapid_vfs_cache.bin: 836470 paths (format=2, inflated=69047227 bytes)
+[2026-02-25 12:34:31.055] [log] [info] [location.cpp:98] R.A.P.I.D. binding loose location old=0x0 new=0x191ebd3ece0 prefix="G:\Steam\steamapps\common\Skyrim Special Edition\"
+[2026-02-25 12:35:14.372] [log] [info] [hook.cpp:116] R.A.P.I.D. performance diagnostics: injected 836470 cached loose-file paths in 49128.175 ms

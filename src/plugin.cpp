@@ -8,6 +8,7 @@ void MessageHandler(SKSE::MessagingInterface::Message* a_msg)
 {
 	switch (a_msg->type) {
 	case SKSE::MessagingInterface::kDataLoaded:
+		RAPID::Hooks::FlushNativeTraversalTiming();
 		RAPID::GetLooseFileCache().Release();
 		break;
 	case SKSE::MessagingInterface::kPostLoad:

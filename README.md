@@ -1,11 +1,6 @@
 # ![RAPID logo](build/images/rapid-logo-icon.png) R.A.P.I.D. -Resource Asset Path Indexing and Dispatch
 
-RAPID is a two-part system for Skyrim SE/AE + MO2:
-
-- an MO2 Python plugin that prebuilds a compressed loose-file BSA hashed binary cache before game launch
-- an SKSE plugin that feeds that index into Skyrim's resource traversal hook on startup
-
-The goal is simple: skip expensive native loose-file directory crawling during initial mount so game launch gets to "actually loading Skyrim" faster.
+RAPID slashes loose-file mount time by ~70%—often saving over two minutes on extremely heavy mod setups. It pre-builds an index before launch so the engine skips slow directory crawling and registers hundreds of thousands of assets from memory instead. Faster startup, same game.
 
 ## How does it work?
 
@@ -37,6 +32,24 @@ If the cache is missing, invalid, or empty, RAPID cleanly falls back to vanilla 
 ### Runtime behavior
 
 RAPID accelerates asset discovery and registration at mount time. Actual file streaming still uses Skyrim's normal loose-file stream path once a resource is resolved.
+
+## Performance
+
+Measured on a respectable heavy load order with over 800,000 loose files.
+
+|  | Native File Loader | RAPID Cache |
+|--------|---------------|------------|
+| Events | 27 traversal requests | 1 cache request |
+| Discovered at runtime | 879,495 files | -- |
+| Loaded | 1,075,620 files | 836,470 files |
+| Processing time | 173,978 ms (~2.9 min) | 49,128 ms (~49 s) |
+| | | **~125 s (~71.7%) faster** |
+
+The native engine scans for loose files using `FindFirstFile`/`FindNextFile` during 27 traversal events, finding 879,495 files and loading 1,075,620—taking nearly three minutes. RAPID, by contrast, loads a pre-built cache (~66 MB inflated) and injects all 836,470 paths in under 50 seconds—about 3.5× faster.
+
+RAPID is faster for several reasons. It doesn't indiscriminately include every discovered file; instead, it excludes system files and unneeded types like PSDs or script source files (.psc). The full exclusion list can be viewed or customized in the RAPID MO2 plugin settings. Another key difference: while the native engine may repeatedly load the same files due to multiple traversal event calls—creating unnecessary overhead—RAPID only loads each file once, and only those truly needed for the game to function. This selective, one-pass approach delivers a significant performance gain.
+
+Performance will vary depending on your load order and number of loose files. To see the impact on your system, set `PerformanceDiagnostics = true` in `config.ini` and check the timings in `RAPID.log`.
 
 ## Requirements
 
