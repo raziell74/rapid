@@ -1,7 +1,4 @@
-# R.A.P.I.D. -Resource Asset Path Indexing and Dispatch
-
-| ![RAPID logo](build/images/rapid-logo-md.png) |
-|:--:|
+# ![RAPID logo](build/images/rapid-logo-icon.png) R.A.P.I.D. -Resource Asset Path Indexing and Dispatch
 
 RAPID is a two-part system for Skyrim SE/AE + MO2:
 
