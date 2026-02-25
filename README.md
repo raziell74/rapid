@@ -1,102 +1,85 @@
-# R.A.P.I.D. (Resource Asset Path Indexing and Dispatch)
+# R.A.P.I.D. -Resource Asset Path Indexing and Dispatch
 
-Welcome to **R.A.P.I.D.**, the mod that finally stops the Skyrim Creation Engine from asking Windows "Are we there yet?" 100,000 times before the main menu even loads.
+RAPID is a two-part system for Skyrim SE/AE + MO2:
 
-R.A.P.I.D. is a two-part performance optimization framework for Skyrim Special Edition / Anniversary Edition and Mod Organizer 2. It fundamentally rewrites how the engine's `BSResource` subsystem discovers and indexes loose files during the initial boot sequence. By completely bypassing the operating system's native file enumeration APIs and skipping the heavy interception overhead of Mod Organizer 2's User Space Virtual File System (USVFS), R.A.P.I.D. achieves near-instant, O(1) loose file registration. Because the only thing that should take five minutes to load is deciding on your character's nose shape.
+- an MO2 Python plugin that prebuilds a compressed loose-file BSA hashed binary cache before game launch
+- an SKSE plugin that feeds that index into Skyrim's resource traversal hook on startup
 
-## The Loose File Bottleneck
+The goal is simple: skip expensive native loose-file directory crawling during initial mount so game launch gets to "actually loading Skyrim" faster.
 
-When Skyrim launches, it builds a Virtual File System (VFS). Bethesda Softworks Archives (BSAs) are the golden children here—they load blazingly fast because the engine just reads a single, highly compressed binary header.
+## How does it work?
 
-"Loose files," on the other hand, are the problem children. To find them, the engine insists on manually crawling your physical storage drive using ancient Windows APIs like `FindFirstFile` and `FindNextFile`. Add 100,000+ loose 4K sweetroll textures to your load order, and throw in Mod Organizer 2's USVFS proxy—which has to individually intercept, translate, and return every single one of those API calls—and suddenly your CPU is crying, your disk is thrashing, and you're staring at a black screen wondering if your PC finally gave up on life.
+Bethesda's vanilla loose-file loading is basically like trying to find every stone of Barenziah in the game without looking it up. On top of that MO2 has to do a translation through it's own virtual file system every time the engine attempts to find a specific file, like using a wiki to look up the stone locations but the wiki is in japanese and you have to copy paste it into google for the translation. Sure it gets you what you need but it's a bad frametime for your patience bar.
 
-## The Solution
+With RAPID instead of the engine walking around aimlessly in the file system, RAPID hands it a pre-made list of every file and where they are. It's like installing a mod that adds map markers. No more bumbling around looking for every stone of Barenziah, just pop open the map and instantly see where they are.
 
-R.A.P.I.D. fixes this by treating your chaotic pile of loose files exactly like a highly-optimized BSA archive. We achieve this with a two-step handshake:
+## Technical Details
 
-### 1. The MO2 Python Plugin (The Indexer)
+RAPID mirrors the way BSA archives are fast to register assets: use hashed path entries instead of asking Windows to enumerate folders in real time.
 
-Before `SkyrimSE.exe` even realizes it's alive, the R.A.P.I.D. MO2 plugin swoops in. It taps into the `mobase.IFileTree` interface to instantly grab the final, conflict-resolved state of your virtual `Data` directory. It then serializes this tree into a compressed binary cache file (essentially a fake BSA header for your loose files) and gently places it into your active MO2 profile.
+### MO2 pre-launch indexing
 
-### 2. The SKSE CommonLibSSE-NG Plugin (The Injector)
+Before the game starts, an MO2 plugin reads the final virtual Data tree from MO2, normalizes the loose file paths, computes a BSA-style 64-bit hash per path, and writes everything into a compressed RAP2 cache.
 
-Once the game actually launches, the R.A.P.I.D. SKSE plugin uses `CommonLibSSE-NG` and the Address Library to execute a Trampoline hook right into the `BSResource::LooseFileLocation` directory traversal routines.
+Each cache record stores:
 
-Instead of letting the engine painfully interrogating Windows for files, we intercept the call, slam our pre-generated binary cache into memory, and manually populate the `BSResource::EntryDB` hash maps with your asset paths. The engine is happily tricked into believing it just successfully enumerated the hard drive. We bypass the USVFS proxy overhead entirely, turning a process that takes minutes into a process that takes milliseconds. *It just works.*
+- path hash (for quick lookup)
+- normalized path string (for exact resolution)
+
+### SKSE startup injection
+
+At startup, the SKSE side intercepts loose-file traversal, loads the RAP2 cache, and injects the cached entries directly into the engine's resource registration flow.
+
+That means the engine can register loose assets from an in-memory hashed index, similar to how BSA file trees are registered quickly, instead of doing slow OS-level `FindFirstFile`/`FindNextFile` traversal across the loose file system.
+
+If the cache is missing, invalid, or empty, RAPID cleanly falls back to vanilla traversal for that session.
+
+### Runtime behavior
+
+RAPID accelerates asset discovery and registration at mount time. Actual file streaming still uses Skyrim's normal loose-file stream path once a resource is resolved.
 
 ## Requirements
 
-* **Skyrim Special Edition or Anniversary Edition** (Supports 1.5.97, 1.6.xx, and VR via CommonLibSSE-NG cross-version magic).
-* **SKSE64** (You know the drill).
-* **Address Library for SKSE Plugins** (Because hardcoding offsets is so 2013).
-* **Mod Organizer 2** (Version 2.3.0 or higher required for full Python module support). *Note: Vortex is not supported. Sorry, Vortex users, we need MO2's specific VFS brain for this one. Get Wrecked Vortex*
+- Skyrim SE/AE
+- SKSE64
+- Address Library for SKSE Plugins
+- Mod Organizer 2 (MO2)
 
 ## Installation
 
-Because this mod relies on two completely different environments (MO2 and SKSE), the installation requires a brief manual step alongside your standard mod manager download.
+RAPID has two components and both are required:
 
-**Step 1: Install the SKSE Injector Plugin (Main File)**
-
-1. On the R.A.P.I.D. Nexus Mods page, navigate to the Files tab.
-2. Click **Mod Manager Download** under the Main Files section for `RAPID SKSE Plugin`.
-3. Install and enable it in Mod Organizer 2 just like any other standard mod. Ensure the checkbox in your left pane is ticked.
-
-**Step 2: Install the MO2 Indexer Plugin (Miscellaneous File)**
-_MO2 plugins operate at the application level, not inside the virtual game folder, so this part must be placed manually._
-
-1. On the Nexus Mods page, click Manual Download under the Miscellaneous/Optional Files section for the `RAPID MO2 Plugin`.
-2. Extract the downloaded archive. Move the Python script directly into your Mod Organizer 2 plugins folder (e.g., `C:\Modding\MO2\plugins\`).
-3. Restart Mod Organizer 2.
-4. Verify it's installed by clicking the Tools -> Tool Plugins menu at the top of MO2. Ensure the setting to "Run automatically on executable launch" is enabled so it can work its magic in the background.
+1. Install the SKSE plugin mod in MO2 like a normal mod.
+2. Install the MO2 Python plugin file into your MO2 `plugins` folder.
+3. Restart MO2 and ensure the RAPID pre-launch hook is enabled.
 
 ## MO2 Plugin Settings
 
-The RAPID MO2 plugin can be configured via **Plugins → RAPID - Pre-Launch Game Hook → Settings** (or the equivalent plugin settings entry in your MO2 version). These options control how the virtual file tree is scanned and which files are written into the binary cache.
+Configure via MO2 plugin settings for `RAPID - Pre-Launch Game Hook`:
 
-| Setting | Description |
-|--------|-------------|
-| **Worker threads** | Number of threads used to traverse the virtual file tree (1 up to your CPU core count). Higher values speed up cache generation; the default is the lesser of 8 or your core count. |
-| **Extension whitelist** | *Additional* file extensions to index, comma-separated (e.g. `.foo,.bar`). These are **added to** the built-in BSA-style default; the default list already includes meshes (`.nif`, `.tri`, `.btr`, `.bto`, etc.), textures (`.dds`, `.tga`), audio (`.wav`, `.xwm`, `.fuz`, `.lip`), animations (`.hkx`, `.btt`), scripts (`.pex`, `.seq`), interface (`.swf`), config (`.ini`, `.json`, `.toml`, `.xml`), localization (`.strings`, `.dlstrings`, `.ilstrings`), video (`.bik`), fonts (`.ttf`, `.otf`), materials (`.bgsm`, `.bgem`), and other engine-relevant types. Leave this field **empty** to use only the default. Add extensions here if you use mods that load loose files with custom extensions. |
-
-Only paths whose file extension is in the combined whitelist are written to the cache. This keeps the game's internal hash maps small and avoids indexing non-asset files (e.g. `.txt`, `.psc`, `.esp`, `.dll`).
+- `worker_threads`: number of scan workers (default is `min(8, CPU threads)`)
+- `extension_blacklist`: comma-separated extensions to exclude from cache, helps avoid mounting loose files that the engine doesn't even use.
+- `output_to_mod`: write cache to a specific mod folder. (if left blank or doesn't match an existing mod name, it will default to the Overwrite folder)
 
 ## SKSE Config
 
-R.A.P.I.D. reads settings from:
+Path:
 
 - `Data/SKSE/Plugins/RAPID/config.ini`
 
-If the file or directory is missing, the SKSE plugin creates it on startup with defaults.
-
-Default file contents:
+Default values:
 
 ```ini
 [General]
 Enabled = true
-VerboseLogging = true
+VerboseLogging = false
 PerformanceDiagnostics = false
 ```
 
-## Cache Format (RAP2)
+## Startup Validation
 
-`rapid_vfs_cache.bin` is zlib-compressed. After decompression, the current layout is:
+Check `%SKSE_LOG_DIR%/RAPID.log`:
 
-- `magic[4]`: `RAP2`
-- `version_u32`: `2`
-- `record_count_u32`
-- repeated records:
-  - `path_hash_u64_le`
-  - `path_len_u16_le`
-  - `path_utf8[path_len]` (canonical lowercase `\\` path, optional leading `data\\` stripped)
-- metadata blob (for MO2 cache stats)
-- `metadata_len_u32_le`
-
-## Startup Validation Checklist
-
-Use `%SKSE_LOG_DIR%/RAPID.log` to validate startup behavior:
-
-- Missing cache: confirm fallback message and normal traversal continues.
-- Corrupt cache: confirm decompression/parse error is logged and traversal falls back.
-- Zero-entry cache: confirm warning is logged and traversal falls back.
-- Large cache: confirm decompressed byte count and parsed entry count are logged.
-- Non-ASCII paths: confirm parse completes without crash and counts are reported.
+- hook installed message
+- first traversal interception message
+- cache load success + path count, or explicit fallback reason (missing/invalid/empty cache)
