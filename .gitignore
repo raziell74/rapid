@@ -5,5 +5,9 @@
 .cursor
 .claude
 CLAUDE.md
-build
+build/*
+!build/rapid-release-*/
+!build/rapid-release-*/**
+!build/images/
+!build/images/**
 cmake-build*
