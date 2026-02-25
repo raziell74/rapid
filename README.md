@@ -1,5 +1,8 @@
 # R.A.P.I.D. -Resource Asset Path Indexing and Dispatch
 
+| ![RAPID logo](build/images/rapid-logo-md.png) |
+|:--:|
+
 RAPID is a two-part system for Skyrim SE/AE + MO2:
 
 - an MO2 Python plugin that prebuilds a compressed loose-file BSA hashed binary cache before game launch
