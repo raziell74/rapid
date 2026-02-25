@@ -12,6 +12,31 @@ With RAPID instead of the engine walking around aimlessly in the file system, RA
 
 RAPID mirrors the way BSA archives are fast to register assets: use hashed path entries instead of asking Windows to enumerate folders in real time.
 
+```mermaid
+flowchart TD
+    subgraph PreLaunch["MO2 Pre-Launch"]
+        A[User launches game from MO2] --> B[RAPID plugin runs]
+        B --> C[Walk virtual Data tree]
+        C --> D[Normalize paths, compute 64-bit hashes]
+        D --> E[Write RAP2 cache to profile]
+    end
+
+    subgraph GameStart["Game Startup"]
+        E --> F[SKSE loads, RAPID hooks LooseFileLocation]
+        F --> G[Engine triggers first traversal]
+        G --> H{Cache valid?}
+        H -->|Yes| I[Load cache, inject entries into engine]
+        H -->|No| J[Fall back to vanilla FindFirstFile/FindNextFile]
+        I --> K[Loose assets registered]
+        J --> K
+    end
+
+    subgraph Runtime["Runtime"]
+        K --> L[Engine resolves resources via index]
+        L --> M[Actual file streaming uses normal loose-file path]
+    end
+```
+
 ### MO2 pre-launch indexing
 
 Before the game starts, an MO2 plugin reads the final virtual Data tree from MO2, normalizes the loose file paths, computes a BSA-style 64-bit hash per path, and writes everything into a compressed RAP2 cache.
