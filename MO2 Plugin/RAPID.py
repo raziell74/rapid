@@ -11,7 +11,7 @@ from typing import List
 
 from mobase.widgets import TaskDialog, TaskDialogButton
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QIcon, QMovie
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMessageBox,
     QProgressDialog,
+    QProgressBar,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -42,17 +43,24 @@ ENGINE_DATA_SUBDIRS = frozenset({
 })
 
 EXCLUDED_EXTENSIONS = (
-    '.esp', '.esm', '.esl',                                  # Plugins (load order)
-    '.bsa', '.ba2',                                          # Archives (mounted separately)
-    '.exe',                                                  # Executables
-    '.psc',                                                  # Papyrus source files
-    '.skse',                                                 # Plugin metadata
-    '.md', '.pdf',                                           # Documentation
-    '.bak', '.tmp', '.temp', '.orig',                        # Backup / temp
-    '.log',                                                  # Logs
-    '.gitignore', '.gitattributes',                          # Version control / IDE
-    '.manifest', '.url', '.lnk',                             # Installer / shortcuts
-    '.db',                                                   # Windows cache files
+    '.esp', '.esm', '.esl',
+    '.bsa', '.ba2', '.exe',
+    '.psc', '.skse','.dll',
+    '.md', '.pdf', '.bak', 
+    '.tmp', '.temp', '.orig',
+    '.log', '.gitignore', '.gitattributes',
+    '.manifest', '.url', '.lnk',
+    '.db', '.lock', '.vsidx',
+    '.7z', '.license', '.bak2',
+    '.original', '.def', '.old',
+    '.zip', '.hkxbak', '.psd',
+    '.mohidden', '.cpp', '.fla',
+    '.vortex_backup', '.backup', '.hidden',
+)
+
+SPINNER_RESOURCE_CANDIDATES = (
+    ":/qt-project.org/styles/commonstyle/images/working-32.gif",
+    ":/qt-project.org/styles/commonstyle/images/working-16.gif",
 )
 
 def _normalize_path(raw: str) -> str:
@@ -191,7 +199,50 @@ def _create_progress_dialog() -> QProgressDialog:
         "QProgressDialog { padding: 14px; }\n"
         "QProgressBar { min-height: 10px; }"
     )
+    spinner_label = QLabel(dialog)
+    spinner_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    spinner_label.setMinimumHeight(36)
+    spinner_label.hide()
+
+    spinner_movie = None
+    for resource_path in SPINNER_RESOURCE_CANDIDATES:
+        candidate = QMovie(resource_path)
+        if candidate.isValid():
+            spinner_movie = candidate
+            break
+    if spinner_movie is not None:
+        spinner_label.setMovie(spinner_movie)
+
+    layout = dialog.layout()
+    if layout is not None:
+        layout.addWidget(spinner_label)
+
+    dialog._rapid_spinner_label = spinner_label
+    dialog._rapid_spinner_movie = spinner_movie
+    dialog._rapid_progress_bar = dialog.findChild(QProgressBar)
     return dialog
+
+
+def _set_build_spinner_enabled(dialog: QProgressDialog, enabled: bool) -> None:
+    spinner_label = getattr(dialog, "_rapid_spinner_label", None)
+    spinner_movie = getattr(dialog, "_rapid_spinner_movie", None)
+    progress_bar = getattr(dialog, "_rapid_progress_bar", None)
+    show_spinner = enabled and spinner_movie is not None
+
+    if progress_bar is not None:
+        progress_bar.setVisible(not show_spinner)
+    if spinner_label is None:
+        return
+
+    spinner_label.setVisible(show_spinner)
+    if spinner_movie is None:
+        return
+    if show_spinner:
+        if spinner_movie.state() != QMovie.MovieState.Running:
+            spinner_movie.start()
+        return
+    if spinner_movie.state() != QMovie.MovieState.NotRunning:
+        spinner_movie.stop()
 
 
 def _update_progress_dialog(
@@ -201,7 +252,9 @@ def _update_progress_dialog(
     maximum: int,
     *,
     indeterminate: bool = False,
+    build_spinner: bool = False,
 ) -> bool:
+    _set_build_spinner_enabled(dialog, build_spinner)
     dialog.setLabelText(label_text)
     if indeterminate:
         dialog.setMinimum(0)
@@ -264,8 +317,41 @@ def _compute_path_counters(paths: list[str]) -> tuple[Counter[str], Counter[str]
     for path in paths:
         _, ext = os.path.splitext(path)
         ext_counter[ext.lower() if ext else "(no ext)"] += 1
-        root_counter[path.split("\\", 1)[0]] += 1
+        root_counter[_engine_directory_from_path(path)] += 1
     return ext_counter, root_counter
+
+
+def _engine_directory_from_path(path: str) -> str:
+    parts = path.split("\\", 2)
+    if len(parts) > 1 and parts[0] == "data":
+        return parts[1]
+    if parts and parts[0]:
+        return parts[0]
+    return "(unknown)"
+
+
+def _compute_extension_counters_by_engine_directory(paths: list[str]) -> dict[str, Counter[str]]:
+    counters: dict[str, Counter[str]] = {}
+    for path in paths:
+        root = _engine_directory_from_path(path)
+        _, ext = os.path.splitext(path)
+        ext_key = ext.lower() if ext else "(no ext)"
+        if root not in counters:
+            counters[root] = Counter()
+        counters[root][ext_key] += 1
+    return counters
+
+
+def _root_counter_has_invalid_metadata(root_counter: Counter[str], path_count: int) -> bool:
+    if not root_counter:
+        return True
+    if sum(root_counter.values()) != path_count:
+        return True
+    if any(count <= 0 for count in root_counter.values()):
+        return True
+    valid_roots = set(ENGINE_DATA_SUBDIRS)
+    valid_roots.add("(unknown)")
+    return any(root not in valid_roots for root in root_counter)
 
 
 def _parse_metadata(
@@ -442,9 +528,25 @@ def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bo
             print("RAPID indexing canceled by user; launching without RAPID cache.")
             return True
 
-        if _update_progress_dialog(
-            progress_dialog, "Building RAPID cache…", 0, 1, indeterminate=True
-        ):
+        build_label = "Building RAPID cache…"
+        last_build_spinner_update = 0.0
+
+        def refresh_build_spinner(force: bool = False) -> bool:
+            nonlocal last_build_spinner_update
+            now = time.monotonic()
+            if not force and now - last_build_spinner_update < 0.05:
+                return False
+            last_build_spinner_update = now
+            return _update_progress_dialog(
+                progress_dialog,
+                build_label,
+                0,
+                1,
+                indeterminate=True,
+                build_spinner=True,
+            )
+
+        if refresh_build_spinner(force=True):
             print("RAPID cache build canceled by user; launching without RAPID cache.")
             return True
 
@@ -458,10 +560,16 @@ def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bo
         serializable_paths: list[str] = []
         for batch in all_batches:
             for raw_path in batch:
+                if refresh_build_spinner():
+                    print("RAPID cache build canceled by user; launching without RAPID cache.")
+                    return True
                 normalized = _normalize_path(raw_path)
                 if normalized and len(normalized.encode("utf-8")) <= 0xFFFF:
                     serializable_paths.append(normalized)
 
+        if refresh_build_spinner(force=True):
+            print("RAPID cache build canceled by user; launching without RAPID cache.")
+            return True
         ext_counter, root_counter = _compute_path_counters(serializable_paths)
 
         build_time_ms = int(time.time() * 1000)
@@ -469,6 +577,9 @@ def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bo
 
         chunks = [RAP2_MAGIC, PACK_U32.pack(RAP2_VERSION), PACK_U32.pack(len(serializable_paths))]
         for path in serializable_paths:
+            if refresh_build_spinner():
+                print("RAPID cache build canceled by user; launching without RAPID cache.")
+                return True
             encoded_path = path.encode('utf-8')
             path_hash = _compute_rapid_hash64(path)
             chunks.append(PACK_U64.pack(path_hash))
@@ -478,10 +589,19 @@ def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bo
         chunks.append(PACK_U32.pack(len(metadata_payload)))
         binary_data = b''.join(chunks)
 
-        compressed_data = zlib.compress(binary_data, level=1)
+        compressor = zlib.compressobj(level=1)
+        compressed_parts: list[bytes] = []
+        step_size = 1 << 20
+        for offset in range(0, len(binary_data), step_size):
+            if refresh_build_spinner():
+                print("RAPID cache build canceled by user; launching without RAPID cache.")
+                return True
+            compressed_parts.append(compressor.compress(binary_data[offset : offset + step_size]))
+        compressed_parts.append(compressor.flush())
+        compressed_data = b"".join(compressed_parts)
 
         if _update_progress_dialog(
-            progress_dialog, "Writing cache to disk…", 0, 1, indeterminate=True
+            progress_dialog, "Writing cache to disk…", 0, 1, indeterminate=True, build_spinner=False
         ):
             print("RAPID cache write canceled by user; launching without RAPID cache.")
             return True
@@ -493,7 +613,7 @@ def run_index_vfs(organizer: mobase.IOrganizer, settings_plugin_name: str) -> bo
             f.write(compressed_data)
 
         _update_progress_dialog(
-            progress_dialog, "RAPID cache complete.", 1, 1, indeterminate=False
+            progress_dialog, "RAPID cache complete.", 1, 1, indeterminate=False, build_spinner=False
         )
         print(f"RAPID Cache built successfully! Indexed {len(serializable_paths)} loose files.")
         return True
@@ -544,6 +664,8 @@ def read_cache_stats(
     parsed = _parse_metadata(raw, path_block_end)
     if parsed is not None:
         build_time_ms, ext_counter, root_counter = parsed
+        if _root_counter_has_invalid_metadata(root_counter, len(paths)):
+            _, root_counter = _compute_path_counters(paths)
     else:
         build_time_ms = None
         ext_counter, root_counter = _compute_path_counters(paths)
@@ -559,7 +681,7 @@ def _format_build_time(build_time_utc_ms: int | None) -> str:
 
 
 class RapidCacheStatsDialog(QDialog):
-    """Dialog showing RAPID cache stats: summary, extensions table, mod roots table."""
+    """Dialog showing RAPID cache stats: summary, extensions table, engine directories table."""
 
     def __init__(
         self,
@@ -587,29 +709,46 @@ class RapidCacheStatsDialog(QDialog):
 
         tabs = QTabWidget()
 
-        # Mod roots table (top 50)
+        # Engine directories table
         root_group = QWidget()
         root_layout = QVBoxLayout(root_group)
         root_rows = root_counter.most_common(50)
         root_table = QTableWidget(len(root_rows), 2)
-        root_table.setHorizontalHeaderLabels(["Mod root", "Count"])
+        root_table.setHorizontalHeaderLabels(["Engine directory", "Entry files"])
         root_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         for row, (root, count) in enumerate(root_rows):
             root_table.setItem(row, 0, QTableWidgetItem(root))
             root_table.setItem(row, 1, QTableWidgetItem(f"{count:,}"))
         root_layout.addWidget(root_table)
-        tabs.addTab(root_group, "Mod roots")
+        tabs.addTab(root_group, "Directory Totals")
 
         # Extensions table
         ext_group = QWidget()
         ext_layout = QVBoxLayout(ext_group)
-        ext_table = QTableWidget(len(ext_counter), 2)
-        ext_table.setHorizontalHeaderLabels(["Extension", "Count"])
-        ext_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        ext_by_root = _compute_extension_counters_by_engine_directory(paths)
+        ext_tabs = QTabWidget()
+
+        totals_table = QTableWidget(len(ext_counter), 2)
+        totals_table.setHorizontalHeaderLabels(["Extension", "Count"])
+        totals_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         for row, (ext, count) in enumerate(ext_counter.most_common()):
-            ext_table.setItem(row, 0, QTableWidgetItem(ext))
-            ext_table.setItem(row, 1, QTableWidgetItem(f"{count:,}"))
-        ext_layout.addWidget(ext_table)
+            totals_table.setItem(row, 0, QTableWidgetItem(ext))
+            totals_table.setItem(row, 1, QTableWidgetItem(f"{count:,}"))
+        ext_tabs.addTab(totals_table, "Totals")
+
+        for root, _ in root_counter.most_common():
+            counter = ext_by_root.get(root)
+            if counter is None:
+                continue
+            root_table = QTableWidget(len(counter), 2)
+            root_table.setHorizontalHeaderLabels(["Extension", "Count"])
+            root_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            for row, (ext, count) in enumerate(counter.most_common()):
+                root_table.setItem(row, 0, QTableWidgetItem(ext))
+                root_table.setItem(row, 1, QTableWidgetItem(f"{count:,}"))
+            ext_tabs.addTab(root_table, root)
+
+        ext_layout.addWidget(ext_tabs)
         tabs.addTab(ext_group, "Extensions")
 
         layout.addWidget(tabs)
@@ -731,7 +870,33 @@ class RapidCacheTool(mobase.IPluginTool):
         return QIcon()
 
     def display(self) -> None:
-        run_index_vfs(self._organizer, HOOK_PLUGIN_NAME)
+        parent = self._parentWidget() if hasattr(self, "_parentWidget") else None
+        if not run_index_vfs(self._organizer, HOOK_PLUGIN_NAME):
+            return
+        candidates = _get_cache_path_candidates(self._organizer, HOOK_PLUGIN_NAME)
+        cache_path = next((path for path in candidates if os.path.isfile(path)), None)
+        if cache_path is None:
+            cache_path = get_rapid_cache_path(self._organizer, HOOK_PLUGIN_NAME)
+        result = read_cache_stats(cache_path)
+        if result is None:
+            QMessageBox.warning(
+                parent,
+                "RAPID cache",
+                f"The cache file is missing or invalid.\n\nPath: {cache_path}\n\nBuild was cancelled or failed.",
+            )
+            return
+        paths, ext_counter, root_counter, build_time_utc_ms = result
+        file_size = os.path.getsize(cache_path) if os.path.isfile(cache_path) else 0
+        dialog = RapidCacheStatsDialog(
+            cache_path=cache_path,
+            file_size=file_size,
+            paths=paths,
+            ext_counter=ext_counter,
+            root_counter=root_counter,
+            build_time_utc_ms=build_time_utc_ms,
+            parent=parent,
+        )
+        dialog.exec()
 
 
 class RapidCacheViewerTool(mobase.IPluginTool):
@@ -752,7 +917,7 @@ class RapidCacheViewerTool(mobase.IPluginTool):
         return "Raziell74"
 
     def description(self) -> str:
-        return "View decompressed RAPID cache stats (extensions, mod roots)."
+        return "View decompressed RAPID cache stats (extensions, engine directories)."
 
     def version(self) -> mobase.VersionInfo:
         return mobase.VersionInfo(1, 0, 0, mobase.ReleaseType.FINAL)
@@ -767,7 +932,7 @@ class RapidCacheViewerTool(mobase.IPluginTool):
         return "RAPID - View Cache Stats"
 
     def tooltip(self) -> str:
-        return "View decompressed RAPID cache stats (extensions, mod roots)."
+        return "View decompressed RAPID cache stats (extensions, engine directories)."
 
     def icon(self) -> QIcon:
         return QIcon()
