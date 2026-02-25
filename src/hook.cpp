@@ -23,7 +23,7 @@ namespace RAPID::Hooks
 		std::atomic<InjectionState> g_injectionState{ InjectionState::kUninitialized };
 	}
 
-	bool TryInjectLooseFileCache(
+	bool InjectLooseFileCache(
 		RE::BSResource::LooseFileLocation* a_this,
 		RE::BSResource::LocationTraverser& a_traverser,
 		const char* a_path)

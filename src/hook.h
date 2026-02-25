@@ -6,7 +6,7 @@
 
 namespace RAPID::Hooks
 {
-    bool TryInjectLooseFileCache(
+    bool InjectLooseFileCache(
         RE::BSResource::LooseFileLocation* a_this,
         RE::BSResource::LocationTraverser& a_traverser,
         const char* a_path);
@@ -39,7 +39,7 @@ namespace RAPID::Hooks
             const char* a_path, 
             RE::BSResource::LocationTraverser& a_traverser)
         {
-            bool isCacheInjected = TryInjectLooseFileCache(a_this, a_traverser, a_path);
+            bool isCacheInjected = InjectLooseFileCache(a_this, a_traverser, a_path);
 
             if (isCacheInjected) {
                 return RE::BSResource::ErrorCode::kNone; 
