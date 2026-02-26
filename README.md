@@ -21,8 +21,8 @@ flowchart TD
   gameStart --> hookInstall[Hook LooseFileLocation DoTraversePrefix]
   hookInstall --> firstTraverse[First Loose Traverse Call]
   firstTraverse --> cacheLoad{Cache Valid}
-  cacheLoad -->|yes| injectPaths[ProcessName For Each Cached Path]
-  cacheLoad -->|no| nativeFallback[Fallback: Call Original DoTraversePrefix]
+  cacheLoad -->|yes - Enter RAPID Cache Flow| injectPaths[ProcessName For Each Cached Path]
+  cacheLoad -->|no - Vanilla Loose File Flow| nativeFallback[Fallback: Call Original DoTraversePrefix]
   injectPaths --> entryDbReady[EntryDB Ready]
   entryDbReady --> streamOpen[DoCreateStream Delegates To LooseLocation]
   streamOpen --> looseComplete
@@ -39,6 +39,8 @@ flowchart TD
   forEachPath --> doCreateStream[DoCreateStream → delegates to LooseLocation]
   doCreateStream --> findNext
   nextPrefix --> traverseEvent
+  looseComplete --> fileStreamComplete[File Asset Stream Finalized]
+  fileStreamComplete --> gamePluginProcessing[Begin Game Plugin Processing]
 ```
 
 ### MO2 pre-launch indexing
