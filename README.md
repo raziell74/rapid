@@ -14,27 +14,31 @@ RAPID mirrors the way BSA archives are fast to register assets: use hashed path 
 
 ```mermaid
 flowchart TD
-    subgraph PreLaunch["MO2 Pre-Launch"]
-        A[User launches game from MO2] --> B[RAPID plugin runs]
-        B --> C[Walk virtual Data tree]
-        C --> D[Normalize paths, compute 64-bit hashes]
-        D --> E[Write RAP2 cache to profile]
-    end
+  mo2Launch[MO2 Launch Event] --> buildCache[Build RAP2 Cache From MO2's finalized virtualFileTree]
+  buildCache --> writeCache[Compress and save the RAP2 Cache down into a compressed binary file]
+  writeCache --> gameLaunch[MO2 launches the game executable]
+  gameLaunch --> gameStart[Skyrim SKSE Plugin Load]
+  gameStart --> hookInstall[Hook LooseFileLocation DoTraversePrefix]
+  hookInstall --> firstTraverse[First Loose Traverse Call]
+  firstTraverse --> cacheLoad{Cache Valid}
+  cacheLoad -->|yes| injectPaths[ProcessName For Each Cached Path]
+  cacheLoad -->|no| nativeFallback[Fallback: Call Original DoTraversePrefix]
+  injectPaths --> entryDbReady[EntryDB Ready]
+  entryDbReady --> streamOpen[DoCreateStream Delegates To LooseLocation]
+  streamOpen --> looseComplete
 
-    subgraph GameStart["Game Startup"]
-        E --> F[SKSE loads, RAPID hooks LooseFileLocation]
-        F --> G[Engine triggers first traversal]
-        G --> H{Cache valid?}
-        H -->|Yes| I[Load cache, inject entries into engine]
-        H -->|No| J[Fall back to vanilla FindFirstFile/FindNextFile]
-        I --> K[Loose assets registered]
-        J --> K
-    end
-
-    subgraph Runtime["Runtime"]
-        K --> L[Engine resolves resources via index]
-        L --> M[Actual file streaming uses normal loose-file path]
-    end
+  nativeFallback --> traverseEvent[Traversal event with path prefix]
+  traverseEvent --> findFirst[FindFirstFileW on path]
+  findFirst --> usvfs[MO2 USVFS translates virtual→physical]
+  findNext[FindNextFileW] --> usvfs
+  usvfs --> hasEntry{Entry?}
+  hasEntry -->|no| morePrefixes{More prefixes?}
+  hasEntry -->|yes| forEachPath[For each discovered path]
+  morePrefixes -->|yes| nextPrefix[New traversal path prefix]
+  morePrefixes -->|no| looseComplete([Loose file loading complete])
+  forEachPath --> doCreateStream[DoCreateStream → delegates to LooseLocation]
+  doCreateStream --> findNext
+  nextPrefix --> traverseEvent
 ```
 
 ### MO2 pre-launch indexing
