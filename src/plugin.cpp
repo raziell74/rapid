@@ -4,10 +4,23 @@
 #include "location.h"
 #include "settings.h"
 
+#include <chrono>
+
+namespace {
+	std::chrono::steady_clock::time_point g_pluginLoadStart;
+}
+
 void MessageHandler(SKSE::MessagingInterface::Message* a_msg)
 {
 	switch (a_msg->type) {
 	case SKSE::MessagingInterface::kDataLoaded:
+		if (RAPID::Settings::Get().performanceDiagnostics) {
+			const auto now = std::chrono::steady_clock::now();
+			const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - g_pluginLoadStart);
+			SKSE::log::info(
+				"[PerformanceDiagnostics] Time from plugin load to kDataLoaded: {} ms",
+				elapsed.count());
+		}
 		RAPID::Hooks::FlushNativeTraversalTiming();
 		RAPID::GetLooseFileCache().Release();
 		break;
@@ -23,6 +36,8 @@ void MessageHandler(SKSE::MessagingInterface::Message* a_msg)
 }
 
 SKSEPluginLoad(const SKSE::LoadInterface *skse) {
+	g_pluginLoadStart = std::chrono::steady_clock::now();
+	
 	SKSE::Init(skse);
 	SetupLog();
 
