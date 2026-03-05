@@ -7,4 +7,5 @@ set(headers ${headers}
     src/cache.h
     src/location.h
     src/bsa_hash.h
+    src/cpu_features.h
 )

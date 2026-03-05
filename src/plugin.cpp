@@ -3,6 +3,7 @@
 #include "hook.h"
 #include "location.h"
 #include "settings.h"
+#include "cpu_features.h"
 
 #include <chrono>
 
@@ -18,7 +19,7 @@ void MessageHandler(SKSE::MessagingInterface::Message* a_msg)
 			const auto now = std::chrono::steady_clock::now();
 			const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - g_pluginLoadStart);
 			SKSE::log::info(
-				"[PerformanceDiagnostics] Time from plugin load to kDataLoaded: {} ms",
+				"[PerformanceDiagnostics] Time to Main Menu (TTMM): {} ms",
 				elapsed.count());
 		}
 		RAPID::Hooks::FlushNativeTraversalTiming();
@@ -44,6 +45,12 @@ SKSEPluginLoad(const SKSE::LoadInterface *skse) {
 	if (!RAPID::Settings::Load()) {
 		SKSE::log::error("RAPID settings failed to load; plugin continuing with defaults");
 	}
+
+	const auto& cpu = RAPID::GetCpuFeatures();
+	SKSE::log::info(
+		"CPU: tier={}, AVX2={}, BMI1={}, AVX512BW={}, AVX512VL={}",
+		static_cast<int>(cpu.highestTier),
+		cpu.hasAVX2, cpu.hasBMI1, cpu.hasAVX512BW, cpu.hasAVX512VL);
 
 	auto& rapidLocation = RAPID::GetRapidLocation();
 	const bool locationRegistered = rapidLocation.Register();
